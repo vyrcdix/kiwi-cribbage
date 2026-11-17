@@ -1,0 +1,68 @@
+/* Design tokens. Mirrors tokens.json. One look, light only. */
+:root {
+  /* colour */
+  --c-cloth: #F1EBDA;        /* screen ground, under the oilcloth check */
+  --c-enamel: #FCFAF4;       /* table top, panels, default card stock */
+  --c-ink: #1F2723;          /* text, rims */
+  --c-ink-soft: #4A554F;     /* captions; 7.6:1 on enamel */
+  --c-hole: #6B746E;         /* board holes, dashed slots */
+  --c-edge: #CFC8B6;         /* hairlines, card edge */
+  --c-green: #2F6B45;        /* primary action, picked state */
+  --c-flesh: #A9C98A;        /* mark only */
+  --c-pale: #DCE8C8;         /* mark only */
+  --c-skin: #7B5B3A;         /* mark only */
+  --c-tomato: #BE3228;       /* rim line, skunk lines, your peg, red suits */
+  --c-blue: #2B5278;         /* opponent's peg; the other team */
+  --c-mustard: #C8900F;      /* third player in cut-throat only; always a diamond with an ink outline */
+  --c-mustard-deep: #8F6608; /* mustard back-peg ring */
+  --c-butter: #E9B93B;       /* scoring highlight outline */
+  --c-butter-soft: #F6E3A6;  /* scoring highlight fill */
+  --check: rgba(47, 107, 69, 0.06);
+
+  /* type */
+  --font-ui: 'Familjen Grotesk', system-ui, sans-serif;
+  --font-num: 'Besley', Georgia, serif;
+  --fs-caption: 13px;
+  --fs-body: 17px;
+  --fs-title: 30px;
+  --fs-score: 32px;
+  --fs-count: 96px;
+  --fs-count-wide: 132px;
+
+  /* space */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 18px;
+  --sp-6: 24px;
+
+  /* radii */
+  --r-panel: 18px;
+  --r-board: 12px;
+  --r-rail: 14px;
+  --r-pill: 22px;
+
+  /* table zones, phone */
+  --zone-player: 56px;
+  --zone-board: 156px;   /* 358 x 156 at 390 wide; use aspect-ratio if the width differs */
+  --zone-prompt: 48px;
+  --zone-hand: 92px;
+  --zone-you: 52px;
+
+  /* motion */
+  --dur-tap: 90ms;
+  --dur-card: 220ms;
+  --dur-flip: 320ms;
+  --dur-count: 120ms;
+  --dur-peg-lift: 90ms;
+  --dur-peg-hop: 70ms;     /* per hole, moves of 5 or fewer */
+  --dur-peg-glide-max: 900ms;
+  --dur-peg-seat: 120ms;
+  --dur-peg-row: 120ms;    /* fade across a row change */
+  --dur-show-step: 450ms;
+  --dur-reduced: 120ms;    /* every movement becomes a fade of this length */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.6, 0, 0.3, 1);
+  --ease-seat: cubic-bezier(0.3, 1.4, 0.5, 1);
+}
