@@ -9,14 +9,13 @@ import {
   applyAction,
   type GameEvent,
   GameError,
-  type PlayerInfo,
   type PlayerView,
   type Seat,
   type ServerMsg,
   viewFor,
 } from '../../shared/game.js';
-import { normalizeCode, shuffle } from './random.js';
-import { parseState, seatOf, type Store } from './store.js';
+import { normalizeCode } from './random.js';
+import { parseState, type Store } from './store.js';
 
 export interface HubOptions {
   /** How often to ping sockets; a socket that misses a whole interval is terminated. */
@@ -29,7 +28,8 @@ interface Conn {
   ws: WebSocket;
   alive: boolean;
   code: string | null;
-  seat: Seat | null;
+  /** Who this socket is; their seat is looked up afresh (seats can be rearranged while waiting). */
+  playerId: string | null;
   helloTimer: NodeJS.Timeout | null;
 }
 
@@ -44,9 +44,15 @@ export function parseAction(raw: unknown): Action | null {
   const a = raw as Record<string, unknown>;
   switch (a.t) {
     case 'discard': {
+      // One card (three or four players) or two (two players); the engine checks which.
       const cards = a.cards;
-      if (!Array.isArray(cards) || cards.length !== 2 || !isCard(cards[0]) || !isCard(cards[1])) return null;
-      return { t: 'discard', cards: [cards[0], cards[1]] };
+      if (!Array.isArray(cards) || cards.length < 1 || cards.length > 2) return null;
+      const out: number[] = [];
+      for (let i = 0; i < cards.length; i++) {
+        if (!isCard(cards[i])) return null;
+        out.push(cards[i]);
+      }
+      return { t: 'discard', cards: out };
     }
     case 'play':
       return isCard(a.card) ? { t: 'play', card: a.card } : null;
@@ -103,23 +109,27 @@ export class Hub {
     if (!room || room.size === 0) return;
     const game = this.store.game(code);
     if (!game) return;
-    const players: [PlayerInfo | null, PlayerInfo | null] = [
-      this.store.playerInfo(game.p0),
-      this.store.playerInfo(game.p1),
-    ];
-    const online = this.online(code);
+    const seats = this.store.seats(game);
+    const players = seats.map((id) => this.store.playerInfo(id));
+    const online = this.online(code, seats);
     const state = parseState(game);
-    const views: Partial<Record<Seat, PlayerView>> = {};
+    const views = new Map<Seat, PlayerView>();
     for (const conn of room) {
-      if (conn.seat === null || conn.ws.readyState !== WebSocket.OPEN) continue;
-      const seat = conn.seat;
-      const view = state ? (views[seat] ??= viewFor(state, seat)) : null;
+      if (conn.playerId === null || conn.ws.readyState !== WebSocket.OPEN) continue;
+      const seat = seats.indexOf(conn.playerId);
+      if (seat < 0) continue;
+      let view: PlayerView | null = null;
+      if (state) {
+        view = views.get(seat) ?? viewFor(state, seat);
+        views.set(seat, view);
+      }
       const msg: ServerMsg = {
         t: 'state',
         code: game.code,
         status: game.status,
         players,
         online,
+        creator: game.creator,
         you: seat,
         view,
         events,
@@ -129,12 +139,35 @@ export class Hub {
     }
   }
 
-  online(code: string): [boolean, boolean] {
-    const out: [boolean, boolean] = [false, false];
+  /** Which seats have at least one open socket. */
+  online(code: string, seats: (string | null)[]): boolean[] {
+    const out = seats.map(() => false);
     for (const conn of this.rooms.get(code) ?? []) {
-      if (conn.seat !== null && conn.ws.readyState === WebSocket.OPEN) out[conn.seat] = true;
+      if (conn.playerId === null || conn.ws.readyState !== WebSocket.OPEN) continue;
+      const seat = seats.indexOf(conn.playerId);
+      if (seat >= 0) out[seat] = true;
     }
     return out;
+  }
+
+  /** Hang up one player's sockets in one room (removed from, or left, a waiting game). */
+  kick(code: string, playerId: string, message: string): void {
+    for (const conn of [...(this.rooms.get(code) ?? [])]) if (conn.playerId === playerId) this.reject(conn, message);
+  }
+
+  /** Hang up one player's sockets everywhere (deactivated). */
+  kickPlayer(playerId: string, message: string): void {
+    for (const conn of [...this.conns]) if (conn.playerId === playerId) this.reject(conn, message);
+  }
+
+  /** Hang up everyone in a room (the game is gone). */
+  closeRoom(code: string, message: string): void {
+    for (const conn of [...(this.rooms.get(code) ?? [])]) this.reject(conn, message);
+  }
+
+  /** Tell everyone in a room something (an error message they can show); nobody is hung up. */
+  notifyRoom(code: string, message: string): void {
+    for (const conn of this.rooms.get(code) ?? []) this.sendError(conn, message);
   }
 
   close(): void {
@@ -152,7 +185,7 @@ export class Hub {
   // ---- internals ----
 
   private onConnection(ws: WebSocket): void {
-    const conn: Conn = { ws, alive: true, code: null, seat: null, helloTimer: null };
+    const conn: Conn = { ws, alive: true, code: null, playerId: null, helloTimer: null };
     this.conns.add(conn);
     conn.helloTimer = setTimeout(() => {
       if (conn.code === null) this.reject(conn, 'Expected hello');
@@ -209,18 +242,19 @@ export class Hub {
   }
 
   private onHello(conn: Conn, token: unknown, rawCode: unknown): void {
-    const player = this.store.playerByToken(token);
-    if (!player) return this.reject(conn, 'Not signed in');
+    const auth = this.store.authenticate(token);
+    if (!auth) return this.reject(conn, 'Not signed in');
+    if (!auth.player.active) return this.reject(conn, 'Your membership has been deactivated');
+    const player = auth.player;
     const code = normalizeCode(rawCode);
     const game = this.store.game(code);
     if (!game) return this.reject(conn, 'No such game');
-    const seat = seatOf(game, player.id);
-    if (seat === null) return this.reject(conn, 'You are not in this game');
+    if (this.store.seatOf(game.code, player.id) === null) return this.reject(conn, 'You are not in this game');
 
     if (conn.helloTimer) clearTimeout(conn.helloTimer);
     conn.helloTimer = null;
     conn.code = game.code;
-    conn.seat = seat;
+    conn.playerId = player.id;
     let room = this.rooms.get(game.code);
     if (!room) this.rooms.set(game.code, (room = new Set()));
     room.add(conn);
@@ -233,19 +267,23 @@ export class Hub {
     if (!action) return this.sendError(conn, 'Malformed action');
     const game = this.store.game(conn.code!);
     if (!game) return this.sendError(conn, 'No such game');
-    if (game.status === 'waiting') return this.sendError(conn, 'Waiting for an opponent');
+    if (game.status === 'waiting')
+      return this.sendError(conn, game.players === 2 ? 'Waiting for an opponent' : 'Waiting for players');
     if (game.status === 'finished') return this.sendError(conn, 'This game is over');
+    if (game.voided_at) return this.sendError(conn, 'This game was voided by the commissioner');
     const state = parseState(game);
     if (!state) return this.sendError(conn, 'Game has not started');
+    const seat = this.store.seatOf(game.code, conn.playerId!);
+    if (seat === null) return this.sendError(conn, 'You are not in this game');
 
     let result: ReturnType<typeof applyAction>;
     try {
-      result = applyAction(state, conn.seat!, action, shuffle);
+      result = applyAction(state, seat, action, this.store.shuffle);
     } catch (err) {
       if (err instanceof GameError) return this.sendError(conn, err.message);
       throw err;
     }
-    this.store.saveState(game, result.state);
+    this.store.transaction(() => this.store.saveState(game, result.state, state));
     this.broadcast(game.code, result.events);
   }
 

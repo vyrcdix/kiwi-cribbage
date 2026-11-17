@@ -45,7 +45,7 @@ function mk(o: Opts): GameState {
   s.turn = o.turn ?? other(s.dealer);
   s.scores = o.scores ?? [0, 0];
   s.back = [...s.scores];
-  s.goSaid = false;
+  s.goSaid = [false, false];
   s.showStep = 0;
   s.showResult = null;
   s.acks = [false, false];
@@ -217,13 +217,13 @@ describe('his heels', () => {
     expect(r.state.scores[0]).toBe(121);
     expect(r.state.winner).toBe(0);
     expect(r.state.phase).toBe('over');
-    expect(r.state.skunk).toBe(2);
+    expect(r.state.skunk).toEqual([0, 2]);
     expect(() => play(r.state, 1, '2h')).toThrow();
   });
   it('heels at 120 caps at 121', () => {
     const r = applyAction(cutState('Jh', 120, 100), 1, { t: 'cut' }, idShuffle);
     expect(r.state.scores[0]).toBe(121);
-    expect(r.state.skunk).toBe(0);
+    expect(r.state.skunk).toEqual([0, 0]);
   });
 });
 
@@ -234,12 +234,12 @@ describe('winning, cap, skunk', () => {
     return applyAction(s, 1, { t: 'cut' }, idShuffle).state;
   };
   it('skunk boundaries: 91 none, 90 skunk, 61 skunk, 60 double skunk', () => {
-    expect(heelsWin(120).skunk).toBe(0);
-    expect(heelsWin(91).skunk).toBe(0);
-    expect(heelsWin(90).skunk).toBe(1);
-    expect(heelsWin(61).skunk).toBe(1);
-    expect(heelsWin(60).skunk).toBe(2);
-    expect(heelsWin(0).skunk).toBe(2);
+    expect(heelsWin(120).skunk).toEqual([0, 0]);
+    expect(heelsWin(91).skunk).toEqual([0, 0]);
+    expect(heelsWin(90).skunk).toEqual([0, 1]);
+    expect(heelsWin(61).skunk).toEqual([0, 1]);
+    expect(heelsWin(60).skunk).toEqual([0, 2]);
+    expect(heelsWin(0).skunk).toEqual([0, 2]);
   });
   it('winning mid-pegging ends the game at once, score capped, back peg kept, hands untouched', () => {
     const s = mk({ hands: ['9c 9d', '5h 4d'], pile: [['Kh', 0]], turn: 1, scores: [30, 118] });
@@ -251,7 +251,7 @@ describe('winning, cap, skunk', () => {
     expect(r2.state.back[1]).toBe(120);
     expect(r2.state.phase).toBe('over');
     expect(r2.state.winner).toBe(1);
-    expect(r2.state.skunk).toBe(2);
+    expect(r2.state.skunk).toEqual([2, 0]);
     expect(r2.state.hands[0]).toEqual(cs('9c 9d'));
     expect(() => play(r2.state, 0, '9c')).toThrow();
     expect(() => ack(r2.state, 0)).toThrow();
@@ -397,7 +397,7 @@ describe('views', () => {
     const s = mk({ hands: ['2s 4s', '5h 6h'] });
     const v = JSON.parse(JSON.stringify(viewFor(s, 0)));
     expect(v.hand).toEqual(s.hands[0]);
-    expect(v.oppHandCount).toBe(2);
+    expect(v.handCounts).toEqual([2, 2]);
     expect(JSON.stringify(v)).not.toContain(JSON.stringify(s.hands[1]));
     expect(Object.keys(v)).not.toEqual(expect.arrayContaining(['crib', 'deck', 'kept', 'hands']));
   });

@@ -4,6 +4,7 @@ import { CODE_ALPHABET } from './random.js';
 import {
   api,
   Client,
+  inviteFrom,
   newPlayer,
   playToEnd,
   playUntil,
@@ -125,7 +126,7 @@ describe('illegal, out-of-turn and malformed actions', () => {
 
     // Pegging: out of turn, and over 31 if it comes up.
     const seats2 = seats;
-    await playUntil(seats2, (m) => m.view!.phase === 'peg' && m.view!.oppHandCount > 0 && m.view!.hand.length > 0);
+    await playUntil(seats2, (m) => m.view!.phase === 'peg' && m.view!.handCounts[1 - m.you] > 0 && m.view!.hand.length > 0);
     const turn = ca.lastState.view!.turn;
     const [onTurn, offTurn] = turn === 0 ? [ca, cb] : [cb, ca];
     const offView = offTurn.lastState.view!;
@@ -188,13 +189,19 @@ describe('auth and membership', () => {
       expect(res.status, JSON.stringify(body)).toBe(400);
       expect(typeof res.body.error).toBe('string');
     }
-    expect((await api(r.base, 'POST', '/api/players', { body: { name: 'x'.repeat(24) } })).status).toBe(201);
+    // Membership is invite-only after the first player.
+    expect((await api(r.base, 'POST', '/api/players', { body: { name: 'x'.repeat(24) } })).status).toBe(403);
+    const invite = await inviteFrom(r.base, created.body.token);
+    expect((await api(r.base, 'POST', '/api/players', { body: { name: 'x'.repeat(24), invite } })).status).toBe(201);
     const badJson = await api(r.base, 'POST', '/api/players', { rawBody: '{nope' });
     expect(badJson.status).toBe(400);
     expect(typeof badJson.body.error).toBe('string');
 
     const meRes = await api(r.base, 'GET', '/api/me', { token: created.body.token });
-    expect(meRes).toEqual({ status: 200, body: { id: created.body.id, name: 'Alice' } });
+    expect(meRes).toEqual({
+      status: 200,
+      body: { id: created.body.id, name: 'Alice', avatar: null, deck: null, fourColour: false, active: true, commissioner: true, createdAt: expect.any(String) },
+    });
     for (const token of [undefined, 'bogus', created.body.token + 'x']) {
       const res = await api(r.base, 'GET', '/api/me', { token });
       expect(res.status).toBe(401);
@@ -223,12 +230,17 @@ describe('auth and membership', () => {
     expect(g.body.code).toMatch(new RegExp(`^[${CODE_ALPHABET}]{5}$`));
     const code = g.body.code as string;
 
-    const waiting = readGame(tmp.dbPath, code).row;
-    expect(waiting).toMatchObject({ p0: a.id, p1: null, status: 'waiting', state: null });
+    expect(g.body.players).toBe(2);
+    const waiting = readGame(tmp.dbPath, code);
+    expect(waiting.row).toMatchObject({ players: 2, creator: a.id, status: 'waiting', state: null, scores: '[0,0]', winner_team: null });
+    expect(waiting.seats).toEqual([a.id, null]);
 
     let list = await api(r.base, 'GET', '/api/games', { token: a.token });
     expect(list.body.games).toEqual([
-      expect.objectContaining({ code, status: 'waiting', you: 0, opponent: null, scores: [0, 0], winner: null, skunk: 0, finishedAt: null }),
+      expect.objectContaining({
+        code, status: 'waiting', players: 2, you: 0, team: 0, creator: true, seats: [{ id: a.id, name: 'Alice' }, null],
+        partner: null, opponents: [], scores: [0, 0], winner: null, skunk: [0, 0], place: null, finishedAt: null,
+      }),
     ]);
     expect((await api(r.base, 'GET', '/api/games', { token: b.token })).body.games).toEqual([]);
 
@@ -242,7 +254,8 @@ describe('auth and membership', () => {
     const j = await api(r.base, 'POST', `/api/games/${code.toLowerCase()}/join`, { token: b.token });
     expect(j).toEqual({ status: 200, body: { code, seat: 1 } });
     const active = readGame(tmp.dbPath, code);
-    expect(active.row).toMatchObject({ p1: b.id, status: 'active', score0: 0, score1: 0 });
+    expect(active.row).toMatchObject({ status: 'active', scores: '[0,0]' });
+    expect(active.seats).toEqual([a.id, b.id]);
     expect(active.state!.phase).toBe('discard');
     // Re-join is idempotent and doesn't redeal.
     expect((await api(r.base, 'POST', `/api/games/${code}/join`, { token: b.token })).body).toEqual({ code, seat: 1 });
@@ -255,7 +268,7 @@ describe('auth and membership', () => {
     const g2 = await api(r.base, 'POST', '/api/games', { token: b.token });
     list = await api(r.base, 'GET', '/api/games', { token: b.token });
     expect(list.body.games.map((x: any) => x.code)).toEqual([g2.body.code, code]);
-    expect(list.body.games[1]).toMatchObject({ you: 1, opponent: { id: a.id, name: 'Alice' }, status: 'active' });
+    expect(list.body.games[1]).toMatchObject({ you: 1, opponents: [{ id: a.id, name: 'Alice' }], status: 'active', creator: false });
     for (let i = 0; i < 31; i++) await api(r.base, 'POST', '/api/games', { token: c.token });
     expect((await api(r.base, 'GET', '/api/games', { token: c.token })).body.games).toHaveLength(30);
   });
@@ -300,7 +313,7 @@ describe('auth and membership', () => {
     expect((await api(r.base, 'POST', `/api/games/${code}/rematch`)).status).toBe(401);
     expect((await api(r.base, 'POST', '/api/games/ZZZZZ/rematch', { token: a.token })).status).toBe(404);
 
-    // B asks first: B becomes seat 0 of the new game.
+    // B asks first; the rematch keeps everyone in the same seats.
     const na = ca.msgs.length;
     const nb = cb.msgs.length;
     const rm = await api(r.base, 'POST', `/api/games/${code.toLowerCase()}/rematch`, { token: b.token });
@@ -326,15 +339,16 @@ describe('auth and membership', () => {
     const old = readGame(tmp.dbPath, code).row;
     expect(old.next_code).toBe(next);
     const fresh = readGame(tmp.dbPath, next);
-    expect(fresh.row).toMatchObject({ p0: b.id, p1: a.id, status: 'active', next_code: null, winner: null });
+    expect(fresh.row).toMatchObject({ players: 2, creator: a.id, status: 'active', next_code: null, winner_team: null });
+    expect(fresh.seats).toEqual([a.id, b.id]);
     expect(fresh.state!.phase).toBe('discard');
     expect(fresh.state!.handNo).toBe(1);
 
-    // New game is playable straight away; A is seat 1 there.
+    // New game is playable straight away; A is still seat 0 there.
     const listA = await api(r.base, 'GET', '/api/games', { token: a.token });
-    expect(listA.body.games[0]).toMatchObject({ code: next, status: 'active', you: 1, opponent: { id: b.id, name: 'Bob' } });
+    expect(listA.body.games[0]).toMatchObject({ code: next, status: 'active', you: 0, opponents: [{ id: b.id, name: 'Bob' }] });
     const ra = await Client.connect(r.wsUrl, a.token, next);
-    expect(ra.msgs[0]).toMatchObject({ t: 'state', code: next, status: 'active', you: 1, next: null });
+    expect(ra.msgs[0]).toMatchObject({ t: 'state', code: next, status: 'active', you: 0, next: null });
     expect((ra.msgs[0] as StateMsg).view!.hand).toHaveLength(6);
     const rb = await Client.connect(r.wsUrl, b.token, next);
     await sleep(30);

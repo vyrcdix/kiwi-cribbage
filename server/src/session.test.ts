@@ -5,6 +5,7 @@ import {
   playToEnd,
   playUntil,
   readGame,
+  rowScores,
   type Running,
   type Seated,
   setupGame,
@@ -61,8 +62,12 @@ describe('persistence', () => {
     const { row } = readGame(tmp.dbPath, code);
     expect(row.status).toBe('finished');
     const w = ca2.lastState.view!.winner!;
-    expect(row.winner).toBe(w === 0 ? a.id : b.id);
-    expect([row.score0, row.score1]).toEqual(cb2.lastState.view!.scores);
+    expect(row.winner_team).toBe(w);
+    expect(rowScores(row)).toEqual(cb2.lastState.view!.scores);
+    expect(readGame(tmp.dbPath, code).seatRows.map((sr) => [sr.player_id, sr.place])).toEqual([
+      [a.id, w === 0 ? 1 : 2],
+      [b.id, w === 1 ? 1 : 2],
+    ]);
   }, 60_000);
 
   it('keeps score columns current on every action', async () => {
@@ -70,7 +75,7 @@ describe('persistence', () => {
     for (let i = 0; i < 60; i++) {
       await step(seats);
       const { row } = readGame(tmp.dbPath, code);
-      expect([row.score0, row.score1]).toEqual(ca.lastState.view!.scores);
+      expect(rowScores(row)).toEqual(ca.lastState.view!.scores);
     }
   }, 60_000);
 });
@@ -115,9 +120,9 @@ describe('reconnect and presence', () => {
 
     await playToEnd(seats2);
     expect(ca.lastState.status).toBe('finished');
-    expect(readGame(tmp.dbPath, code).row.winner).toBe(
-      ca.lastState.view!.winner === 0 ? a.id : b.id,
-    );
+    const after = readGame(tmp.dbPath, code);
+    expect(after.row.winner_team).toBe(ca.lastState.view!.winner);
+    expect(after.seats).toEqual([a.id, b.id]);
   }, 60_000);
 
   it('terminates sockets that stop answering pings, and unauthenticated idlers', async () => {

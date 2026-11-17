@@ -3,9 +3,9 @@ import { createServer, type Server } from 'node:http';
 import { apiRouter, errorMiddleware } from './api.js';
 import { applyMigrations, dbPath as defaultDbPath, openDb, type DB } from './db.js';
 import { Hub, type HubOptions } from './hub.js';
-import { Store } from './store.js';
+import { Store, type StoreOptions } from './store.js';
 
-export interface AppOptions extends HubOptions {
+export interface AppOptions extends HubOptions, StoreOptions {
   /** SQLite file; defaults to CABBAGE_DB or server/cabbage.db. */
   dbPath?: string;
   /** Log applied migrations (default true). */
@@ -22,7 +22,8 @@ export type CabbageServer = Server & {
 export function createApp(opts: AppOptions = {}): CabbageServer {
   const db = openDb(opts.dbPath ?? defaultDbPath());
   applyMigrations(db, opts.logMigrations ?? true);
-  const store = new Store(db);
+  const store = new Store(db, { shuffle: opts.shuffle, clock: opts.clock });
+  store.heal();
 
   const app = express();
   // Behind Caddy in production.

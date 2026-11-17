@@ -8,10 +8,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import { value } from '../../shared/cards.js';
-import type { Action, GameState, PlayerView, ServerMsg } from '../../shared/game.js';
+import { type Action, discardCount, type GameState, leftOf, type PlayerCount, type PlayerView, type ServerMsg } from '../../shared/game.js';
 import { type CabbageServer, createApp } from './app.js';
 import type { HubOptions } from './hub.js';
-import type { GameRow } from './store.js';
+import { type GameRow, type SeatRow, type StoreOptions, upgradeState } from './store.js';
 
 export type StateMsg = Extract<ServerMsg, { t: 'state' }>;
 
@@ -30,7 +30,7 @@ export interface Running {
   wsUrl: string;
 }
 
-export const startApp = async (dbPath: string, opts: HubOptions = {}): Promise<Running> => {
+export const startApp = async (dbPath: string, opts: HubOptions & StoreOptions = {}): Promise<Running> => {
   const server = createApp({ dbPath, logMigrations: false, ...opts });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
@@ -66,10 +66,35 @@ export interface Player {
   token: string;
 }
 
-export const newPlayer = async (base: string, name: string): Promise<Player> => {
-  const r = await api(base, 'POST', '/api/players', { body: { name } });
-  if (r.status !== 201) throw new Error(`createPlayer failed: ${r.status} ${JSON.stringify(r.body)}`);
-  return r.body as Player;
+// Membership is invite-only: the first player of a fresh database needs no
+// invite; everyone after is invited by a member. One member per server (keyed
+// by base URL) issues the invites; creation is serialised per server.
+const inviters = new Map<string, string>();
+const queues = new Map<string, Promise<unknown>>();
+
+export const newPlayer = (base: string, name: string): Promise<Player> => {
+  const run = async (): Promise<Player> => {
+    let invite: string | undefined;
+    const inviter = inviters.get(base);
+    if (inviter) {
+      const inv = await api(base, 'POST', '/api/invites', { token: inviter });
+      if (inv.status === 201) invite = inv.body.token as string;
+    }
+    const r = await api(base, 'POST', '/api/players', { body: invite ? { name, invite } : { name } });
+    if (r.status !== 201) throw new Error(`createPlayer failed: ${r.status} ${JSON.stringify(r.body)}`);
+    if (!invite) inviters.set(base, r.body.token as string);
+    return r.body as Player;
+  };
+  const next = (queues.get(base) ?? Promise.resolve()).catch(() => {}).then(run);
+  queues.set(base, next);
+  return next;
+};
+
+/** An invite token from any member (for tests that call POST /api/players themselves). */
+export const inviteFrom = async (base: string, token: string): Promise<string> => {
+  const inv = await api(base, 'POST', '/api/invites', { token });
+  if (inv.status !== 201) throw new Error(`invite failed: ${inv.status} ${JSON.stringify(inv.body)}`);
+  return inv.body.token as string;
 };
 
 /** A ws client that records every message it receives. */
@@ -177,12 +202,12 @@ export const legalMove = (view: PlayerView | null): Action | null => {
     case 'discard': {
       if (view.discarded[you]) return null;
       const hand = [...view.hand];
-      const a = hand.splice(Math.floor(Math.random() * hand.length), 1)[0];
-      const b = pickRandom(hand);
-      return { t: 'discard', cards: [a, b] };
+      const cards = [];
+      for (let k = 0; k < discardCount(view.players); k++) cards.push(hand.splice(Math.floor(Math.random() * hand.length), 1)[0]);
+      return { t: 'discard', cards };
     }
     case 'cut':
-      return view.dealer !== you ? { t: 'cut' } : null;
+      return leftOf(view.players, view.dealer) === you ? { t: 'cut' } : null;
     case 'peg': {
       if (view.turn !== you) return null;
       const ok = view.hand.filter((c) => view.count + value(c) <= 31);
@@ -201,10 +226,10 @@ export interface Seated {
 }
 
 /**
- * One step: pick a random player with a legal move, send it, and wait for both
- * players to receive the resulting state. Returns false if the game is over.
+ * One step: pick a random player with a legal move, send it, and wait for every
+ * player to receive the resulting state. Returns false if the game is over.
  */
-export const step = async (seats: [Seated, Seated]): Promise<boolean> => {
+export const step = async (seats: Seated[]): Promise<boolean> => {
   const s0 = seats[0].client.lastState;
   if (s0.status === 'finished') return false;
   const options = seats
@@ -214,19 +239,19 @@ export const step = async (seats: [Seated, Seated]): Promise<boolean> => {
     throw new Error(`stuck: ${JSON.stringify(seats.map((s) => s.client.lastState.view))}`);
   }
   const { s: actor, move } = pickRandom(options);
-  const other = seats.find((s) => s !== actor)!;
+  const others = seats.filter((s) => s !== actor);
   const na = actor.client.msgs.length;
-  const no = other.client.msgs.length;
+  const no = others.map((o) => o.client.msgs.length);
   actor.client.send({ t: 'act', action: move });
   const reply = await actor.client.waitCount(na + 1);
   if (reply.t !== 'state') throw new Error(`move ${JSON.stringify(move)} rejected: ${JSON.stringify(reply)}`);
-  await other.client.waitCount(no + 1);
+  await Promise.all(others.map((o, i) => o.client.waitCount(no[i] + 1)));
   return true;
 };
 
 /** Step until pred holds on seat 0's latest state (or the game ends). */
 export const playUntil = async (
-  seats: [Seated, Seated],
+  seats: Seated[],
   pred: (m: StateMsg) => boolean,
   onStep?: () => void,
   maxSteps = 5000,
@@ -239,13 +264,13 @@ export const playUntil = async (
   throw new Error('playUntil: too many steps');
 };
 
-export const playToEnd = (seats: [Seated, Seated], onStep?: () => void) =>
+export const playToEnd = (seats: Seated[], onStep?: () => void) =>
   playUntil(seats, (m) => m.status === 'finished', onStep);
 
-/** Wait until every client's latest state shows both seats online. */
+/** Wait until every client has seen a state with every seat online. */
 export const bothOnline = async (clients: Client[]) => {
   for (const c of clients) {
-    await c.waitFor((m) => m.t === 'state' && m.online[0] && m.online[1], 0);
+    await c.waitFor((m) => m.t === 'state' && m.online.every(Boolean), 0);
   }
   // Let any trailing presence broadcasts land before counting messages.
   await sleep(30);
@@ -273,13 +298,49 @@ export const setupGame = async (r: Running) => {
   return { a, b, code, ca, cb, seats, created, joined };
 };
 
-/** Read-only peek at the authoritative row. */
-export const readGame = (dbPath: string, code: string): { row: GameRow; state: GameState | null } => {
+export const allOnline = bothOnline;
+
+const NAMES = ['Alice', 'Bob', 'Carol', 'Dave'];
+
+/**
+ * A game for `players`: the first player creates it and connects while
+ * waiting, the rest join over HTTP in order (taking seats 1, 2, …), and once
+ * the last seat fills and the opening is dealt everyone connects.
+ */
+export const setupTable = async (r: Running, players: PlayerCount) => {
+  const people = await Promise.all(NAMES.slice(0, players).map((n) => newPlayer(r.base, n)));
+  const created = await api(r.base, 'POST', '/api/games', { token: people[0].token, body: { players } });
+  if (created.status !== 201) throw new Error(`create failed ${created.status}`);
+  const code = created.body.code as string;
+  const first = await Client.connect(r.wsUrl, people[0].token, code);
+  for (const p of people.slice(1)) {
+    const joined = await api(r.base, 'POST', `/api/games/${code}/join`, { token: p.token });
+    if (joined.status !== 200) throw new Error(`join failed ${joined.status}`);
+  }
+  await first.waitFor((m) => m.t === 'state' && m.status === 'active');
+  const clients = [first];
+  for (const p of people.slice(1)) clients.push(await Client.connect(r.wsUrl, p.token, code));
+  await bothOnline(clients);
+  const seats: Seated[] = people.map((player, i) => ({ player, client: clients[i] }));
+  return { code, people, clients, seats };
+};
+
+/** Read-only peek at the authoritative row, its state and its seating. */
+export const readGame = (
+  dbPath: string,
+  code: string,
+): { row: GameRow; state: GameState | null; seats: (string | null)[]; seatRows: SeatRow[] } => {
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
     const row = db.prepare('SELECT * FROM games WHERE code = ?').get(code) as GameRow;
-    return { row, state: row?.state ? (JSON.parse(row.state) as GameState) : null };
+    const seatRows = db.prepare('SELECT * FROM game_players WHERE game_code = ? ORDER BY seat').all(code) as SeatRow[];
+    const seats: (string | null)[] = row ? Array(row.players).fill(null) : [];
+    for (const sr of seatRows) seats[sr.seat] = sr.player_id;
+    return { row, state: row?.state ? upgradeState(JSON.parse(row.state)) : null, seats, seatRows };
   } finally {
     db.close();
   }
 };
+
+/** The scores column as numbers by team. */
+export const rowScores = (row: GameRow): number[] => JSON.parse(row.scores) as number[];
