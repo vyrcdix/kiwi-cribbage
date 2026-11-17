@@ -15,7 +15,7 @@ export interface DeckSpec {
   radius: number;
   indexFont: string;
   frame: 'single' | 'double';
-  /** How the full face shows court photos. The mini-slot (under 90 px) always shows the tinted render. */
+  /** How court photos are shown, at every size: 'natural' (the default), 'tinted' or 'mono' (handoff v3). */
   photoTreatment: PhotoTreatment;
   /** Card code (rank + S/H/D/C, e.g. 'QH', 'AS') to a 4:5 photo, as uploaded (natural). */
   photos: Partial<Record<string, string>>;
@@ -43,15 +43,13 @@ const enamel: DeckSpec = {
   radius: 0.07,
   indexFont: BESLEY,
   frame: 'double',
-  photoTreatment: 'tinted',
+  photoTreatment: 'natural',
   photos: {},
 };
 
 export const DECKS: Record<string, DeckSpec> = {
   // Lily is the family dog: the Enamel deck's tokens, her photos on all twelve
-  // courts and the back. The owner asked for her photos as they are, so the full
-  // face stays natural until the designer has seen the tinted and tritone sheet
-  // (design-handback-2 §1). The mini-slot still shows the baked tinted render.
+  // courts and the back, shown natural, the default for every deck (handoff v3).
   lily: {
     ...enamel,
     id: 'lily',
@@ -71,7 +69,7 @@ export const DECKS: Record<string, DeckSpec> = {
     radius: 0.035,
     indexFont: BESLEY,
     frame: 'double',
-    photoTreatment: 'tinted',
+    photoTreatment: 'natural',
     photos: {},
   },
   blueplate: {
@@ -84,7 +82,7 @@ export const DECKS: Record<string, DeckSpec> = {
     radius: 0.11,
     indexFont: GROTESK,
     frame: 'double',
-    photoTreatment: 'tinted',
+    photoTreatment: 'natural',
     photos: {},
   },
 };

@@ -107,11 +107,20 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
     return () => clearTimeout(t);
   }, [pending]);
 
+  // Presence: by seat, the slot each other player is considering, and the moment
+  // (deal, phase, cards held) it was said in. It only shows while that still holds.
+  const [presence, setPresence] = useState<Record<number, { slot: number; at: string }>>({});
+  const latest = useRef<StateMsg | null>(null);
+  const momentOf = (m: StateMsg | null, seat: number) =>
+    m?.view ? `${m.view.handNo}:${m.view.phase}:${m.view.handCounts[seat]}` : '';
+
   const sock = useGameSocket({
     code,
     token,
     enabled: join.kind === 'ok',
     onState: (m, fresh) => {
+      latest.current = m;
+      if (fresh) setPresence({});
       setMsg(m);
       setPending(false);
       // Each message's events are a beat for the table's choreography.
@@ -121,6 +130,11 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
       setPending(false);
       showToast(message);
     },
+    onPresence: (seat, slot) =>
+      setPresence((p) => {
+        const { [seat]: _gone, ...rest } = p;
+        return slot === null ? rest : { ...rest, [seat]: { slot, at: momentOf(latest.current, seat) } };
+      }),
   });
 
   const act = useCallback(
@@ -198,6 +212,10 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
     );
 
   const names = seatNames(msg, profile.name);
+  const considering = msg.players.map((_, s) => {
+    const p = presence[s];
+    return p && msg.online[s] && p.at === momentOf(msg, s) ? p.slot : null;
+  });
   const emojis = msg.players.map((p) => (p ? session?.members.get(p.id)?.avatar?.emoji ?? null : null));
 
   // Removed from (or left) a waiting game: the server hung up on purpose.
@@ -228,6 +246,8 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
       toast={toast ?? (sock.fatal ? sock.fatal : null)}
       rematch={{ busy: rematchBusy, error: rematchError, go: goRematch }}
       emojis={emojis}
+      considering={considering}
+      consider={sock.consider}
       next={nextFixture ? { label: nextLabel(nextFixture, profile.id), busy: nextBusy, error: nextError, go: goNext } : null}
     />
   );

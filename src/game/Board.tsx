@@ -5,6 +5,7 @@
 // bottom clockwise from your left; yours is always the bottom one. Pegs move in JS
 // along the track (motion.md): the back peg leapfrogs the front one, lifting, hopping
 // or gliding, fading across a row change and seating with a small overshoot.
+import { play } from './sounds';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { onSkip, reducedMotion } from './motion';
 import {
@@ -39,7 +40,7 @@ const HOLES = '0.01 9.59 0.01 9.59 0.01 9.59 0.01 9.59 0.01 12.59';
 export const TEAM: Record<TeamColour, { peg: string; ring: string; tint: string; outline: string; shape: 'round' | 'diamond' }> = {
   tomato: { peg: '#BE3228', ring: '#BE3228', tint: '#CC8F88', outline: '#FCFAF4', shape: 'round' },
   blue: { peg: '#2B5278', ring: '#2B5278', tint: '#7F93A8', outline: '#FCFAF4', shape: 'round' },
-  mustard: { peg: '#C8900F', ring: '#8F6608', tint: '#BFA256', outline: '#1F2723', shape: 'diamond' },
+  mustard: { peg: '#C8900F', ring: '#8F6608', tint: '#94803F', outline: '#1F2723', shape: 'diamond' },
 };
 
 /** Hole, peg and ring sizes for two and three lanes. */
@@ -148,6 +149,13 @@ export function Board({ teams: lanes, scores, back, onSeated, finishLit }: Props
       el?.setAttribute('data-lifted', '');
       for (const e of tl.rowEntries) {
         if (e.row >= 2) tabTimers.push(setTimeout(() => setPulse(e.row), e.t));
+      }
+      // A long move ticks, barely, past every fifth hole (sound.md). Cleared with the
+      // move, so a skip never bursts.
+      if (!reduced && m.to - from > 5) {
+        for (let h = Math.ceil((from + 1) / 5) * 5; h < m.to; h += 5) {
+          tabTimers.push(setTimeout(() => play('pegTick'), (tl.duration * (h - from)) / (m.to - from)));
+        }
       }
       const t0 = performance.now();
       const tick = (now: number) => {

@@ -1,18 +1,22 @@
-// Photo treatments, baked once (handoff v2 photo-treatment.js, ported as is). Pure
+// Photo treatments, baked once (handoff v3 photo-treatment.js, ported as is). Pure
 // functions over RGBA bytes (ImageData.data, or sharp's raw output), with no imports,
 // so the baking script (scripts/bake-deck.mjs) runs this same file under Node.
 //
-//   'tinted'   (default)  the photo keeps its colour at reduced saturation, pulled part-way
-//                         toward a tritone of the suit ink. Survives any ink and any subject.
-//   'tritone'             shadow ink -> suit ink -> card stock. The old 'duotone', fixed so a
-//                         mid-tone ink (red) still gets the full tonal range.
-//   'natural'             untouched. The vignette and frame still apply in CSS.
+//   'natural'  (default)  untouched. The frame and vignette, in CSS, do the unifying.
+//   'tinted'              the photo keeps nearly all its colour; the suit ink is pushed into
+//                         the shadows only, so highlights stay clean and red and black suits
+//                         look different. Revised after the second Lily sheet (was a flat 22%).
+//   'mono'                one ink for every suit: rim ink -> card stock. Pass the deck's BLACK
+//                         ink, whatever the card's suit. Replaces 'tritone', which the Lily
+//                         sheets showed is not usable in red. The suit is carried by the frame.
+//
+// The ramp() below still accepts any ink, so a red ramp can be tried, but nothing ships with it.
 //
 // Why the old duotone failed in red: it mapped black to the ink itself, and #BE3228 is a
 // mid-tone, so every photo was squeezed into the lighter half of the range. Tritone maps black
 // to the ink mixed 85% toward rim ink, and holds the pure ink back to the lower-middle tones.
 
-export type PhotoTreatment = 'tinted' | 'tritone' | 'natural';
+export type PhotoTreatment = 'natural' | 'tinted' | 'mono';
 
 type RGB = [number, number, number];
 
@@ -68,6 +72,7 @@ function levels(data: ArrayLike<number>): { lo: number; span: number } {
 
 export interface TreatOptions {
   treatment?: PhotoTreatment;
+  /** For 'mono', the deck's black ink; for 'tinted', the card's suit ink. */
   ink: string;
   stock: string;
   saturation?: number;
@@ -80,7 +85,7 @@ export interface TreatOptions {
  */
 export function treat<T extends { length: number; [i: number]: number }>(
   data: T,
-  { treatment = 'tinted', ink, stock, saturation = 0.65, strength = 0.22 }: TreatOptions,
+  { treatment = 'natural', ink, stock, saturation = 0.85, strength = 0.5 }: TreatOptions,
 ): T {
   if (treatment === 'natural') return data;
   const r = ramp(ink, stock);
@@ -94,12 +99,13 @@ export function treat<T extends { length: number; [i: number]: number }>(
     let out = tri;
     if (treatment === 'tinted') {
       const grey: RGB = [y * 255, y * 255, y * 255];
-      out = mix(mix(grey, c, saturation), tri, strength);
+      // Full strength at black, none at white: the ink lives in the shadows.
+      out = mix(mix(grey, c, saturation), tri, strength * (1 - t));
     }
     data[i] = put(out[0]); data[i + 1] = put(out[1]); data[i + 2] = put(out[2]);
   }
   return data;
 }
 
-// A court needs at most two renders per treatment: its two-colour ink and its
-// four-colour ink. Store tinted always, for the mini-slot.
+// Renders per court: none for natural, one for mono, at most two for tinted (its
+// two-colour ink and its four-colour ink).

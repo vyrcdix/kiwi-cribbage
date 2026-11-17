@@ -9,7 +9,7 @@ import { cardText } from '../lib/format';
 import { type ShowLine, showRows } from './callouts';
 import { CSS_EASE, DUR, appear, flyFrom, reducedMotion, rememberRect, takeRect } from './motion';
 import type { PegDisplay } from './pegging';
-import { type TrackerStage, toneOfSeat } from './seating';
+import { type TrackerStage, chipLabels, toneOfSeat } from './seating';
 import { TeamMark, teamColourOf } from './TeamMark';
 
 // ---------- top row ----------
@@ -155,8 +155,8 @@ function PlayedCard({ play, view, names, state, fresh }: { play: Play; view: Pla
   const tone = toneOfSeat(view.players, view.you, play.seat);
   const who = mine ? 'Played by you' : `Played by ${names[play.seat]}`;
   // Three and four players: a chip in the team colour with the player's initial says
-  // whose card it is (a bare diamond for mustard). Theirs sit high, chip above; yours
-  // still sit 20 px low with the chip below. Two players keep the plain bars.
+  // whose card it is (a bare diamond for mustard), always below the card (handoff v3):
+  // theirs start at the top of the row and yours lower. Two players keep the plain bars.
   if (view.players > 2) {
     return (
       <div
@@ -167,8 +167,8 @@ function PlayedCard({ play, view, names, state, fresh }: { play: Play; view: Pla
         role="group"
         aria-label={who}
       >
-        <TeamMark tone={tone} initial={(names[play.seat]?.trim()[0] ?? '?').toUpperCase()} size={16} />
         <CardView card={play.card} fluid state={state} />
+        <TeamMark tone={tone} initial={chipLabels(view.players, names)[play.seat]} size={16} />
       </div>
     );
   }
@@ -253,7 +253,7 @@ export function PeggingStage({
 // ---------- the show ----------
 
 export function ShowStage({
-  cards, starter, lines, current, playing, gap, twentyNine, crib, total, totalPhrase, onTap, onRecount,
+  cards, starter, lines, current, playing, gap, twentyNine, crib, total, totalPhrase, onTap,
 }: {
   crib: boolean;
   cards: Card[];
@@ -270,10 +270,7 @@ export function ShowStage({
   totalPhrase: string;
   /** A tap on the stage: the next step now. */
   onTap: () => void;
-  /** Count the hand again from the start. */
-  onRecount: () => void;
 }) {
-  const listRef = useRef<HTMLOListElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const entering = playing && current < 0;
   // The four cards and the starter slide onto the stage (260 ms).
@@ -292,19 +289,14 @@ export function ShowStage({
   const finished = !playing || current >= L;
   const shownIdx = finished ? L : gap ? current - 1 : current;
   const step = shownIdx >= 0 && shownIdx < L ? lines[shownIdx] : null;
-  const stateOf = (c: Card): CardState => (playing && step && !gap ? (step.cards.includes(c) ? 'lit' : 'dim') : '');
-  const runningNow = finished ? total : step ? step.running : shownIdx >= 0 ? lines[shownIdx - 1]?.running ?? 0 : 0;
-  // Earlier steps above it: long counts fold finished groups (never the step on show).
+  // Exactly the current step's cards lit and the rest dim; on the last beat all at full strength.
+  const stateOf = (c: Card): CardState => (finished ? '' : step && !gap ? (step.cards.includes(c) ? 'lit' : 'dim') : step ? 'dim' : '');
+  const runningNow = finished ? total : step ? step.running : 0;
+  // What has been said, one quiet line. Long counts fold finished groups ("Fifteens,
+  // eight of them: 16") once five would show; the step on show is never in it.
   const rows = finished
-    ? showRows(lines, -1)
-    // While counting, the big line below holds the current step, so the history folds
-    // a line sooner (five in all) to keep a long count on one screen at 360.
+    ? showRows(lines, -1, 5)
     : shownIdx <= 0 ? [] : showRows(lines.slice(0, shownIdx + 1), shownIdx, 5).slice(0, -1);
-
-  useLayoutEffect(() => {
-    const el = listRef.current?.lastElementChild;
-    if (el && 'scrollIntoView' in el) (el as HTMLElement).scrollIntoView({ block: 'nearest' });
-  }, [shownIdx, rows.length]);
 
   if (twentyNine) {
     return (
@@ -321,6 +313,12 @@ export function ShowStage({
 
   // "twenty‑six" must not break at its hyphen.
   const nb = (t: string) => t.replace(/-/g, '‑');
+  const lower = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
+  const folded = rows.some((r) => r.count > 1);
+  const said = rows.map((r, i) => {
+    const text = r.count > 1 ? `${r.name}, ${r.detail}` : nb(r.name);
+    return i === 0 ? text : lower(text);
+  });
   const phrase = nb(step ? step.name : finished ? totalPhrase : 'Counting…');
   return (
     <div className="show" data-playing={playing || undefined} onClick={playing ? onTap : undefined}>
@@ -334,29 +332,28 @@ export function ShowStage({
           <CardView card={starter} fluid state={stateOf(starter)} label={`Starter: ${cardText(starter)}`} />
         </span>
       </div>
-      {rows.length > 0 && (
-        <ol className="combos" ref={listRef} aria-label="Counted so far">
-          {rows.map((l) => (
-            <li key={l.key} data-folded={l.count > 1 || undefined}>
-              {l.count > 1
-                ? <span><strong>{l.name}</strong>, {l.detail}</span>
-                : <span><strong>{nb(l.name)}</strong> <small>{l.detail}</small></span>}
-              <b>{l.running}</b>
-            </li>
-          ))}
-        </ol>
-      )}
-      <div className="saying" data-state={step && !gap ? 'step' : finished ? 'total' : 'wait'}>
-        <div className="saying__text" aria-live="polite">
-          <p className="saying__phrase" key={`p${shownIdx}`}>{phrase}</p>
-          {step && <p className="saying__reason">{step.detail}</p>}
-          {finished && L > 0 && !playing && (
-            <button type="button" className="saying__again" onClick={(e) => { e.stopPropagation(); onRecount(); }}>Count again</button>
-          )}
+      {said.length > 0 && <p className="count-said">{said.join(folded ? '; ' : ', ')},</p>}
+      <div className="count-now" aria-live="polite">
+        <div className="count-now__text" key={shownIdx}>
+          <p className="count-now__phrase">{phrase}</p>
+          {step && <p className="count-now__reason">{step.detail}</p>}
         </div>
-        <b className="saying__total" key={`t${runningNow}`} aria-label={`${runningNow} points`}>{runningNow}</b>
+        <div className="count-total" data-final={finished || undefined} role="img" aria-label={`Running total, ${runningNow}`}>
+          <span key={runningNow}>{runningNow}</span>
+        </div>
       </div>
     </div>
+  );
+}
+
+/** "Count again": a 44 px round icon button in the prompt zone, before Continue (handoff v3). */
+export function CountAgain({ onPress }: { onPress: () => void }) {
+  return (
+    <button type="button" className="btn btn--icon" aria-label="Count again" onClick={onPress}>
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 12 a8 8 0 1 0 2.6 -5.9" /><path d="M4 4 V8.5 H8.5" />
+      </svg>
+    </button>
   );
 }
 

@@ -447,7 +447,12 @@ export function seatsToActInView(v: PlayerView): Seat[] {
 export interface PlayerInfo { id: string; name: string }
 export type ClientMsg =
   | { t: 'hello'; token: string; code: string }
-  | { t: 'act'; action: Action };
+  | { t: 'act'; action: Action }
+  /**
+   * Presence: the card in your hand you are considering (hovering, pressing, or
+   * have picked to discard), or null for none. At most about 4 a second.
+   */
+  | { t: 'consider'; card: Card | null };
 /** One row of GET /api/games, from the asking player's point of view. */
 export interface GameSummary {
   code: string;
@@ -501,4 +506,10 @@ export type ServerMsg =
       /** Code of the rematch, once someone has started one. */
       next: string | null;
     }
+  /**
+   * Presence: which of a player's face-down cards they are considering, sent to
+   * everyone else at the table. `slot` indexes the cards they hold in an order
+   * the server scrambles per hand, so it says nothing about which card it is.
+   */
+  | { t: 'presence'; seat: Seat; slot: number | null }
   | { t: 'error'; message: string };

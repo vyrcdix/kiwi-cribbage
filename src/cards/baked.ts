@@ -5,7 +5,7 @@ export default /*BEGIN*/{
     "dir": "/decks/lily/baked",
     "treatments": [
       "tinted",
-      "tritone"
+      "mono"
     ],
     "codes": [
       "JS",

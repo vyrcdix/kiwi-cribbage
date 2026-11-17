@@ -30,10 +30,9 @@ interface Props {
   /** The player's chosen emoji (their league avatar), drawn on the team-coloured disc in place of the initial. */
   emoji?: string | null;
   /**
-   * PRESENCE HOOK (not built): index of the face-down card this opponent is
-   * considering, which lifts 6 px (README answer 4). Needs a server message
-   * carrying the hovered index, throttled to about 4 a second; nothing sends it
-   * yet, so this is always undefined.
+   * Presence (README answer 4): which of this player's face-down cards they are
+   * considering; it lifts 6 px. The slot comes from the server, which scrambles
+   * the order per hand so the position says nothing about the card.
    */
   considering?: number;
 }
@@ -82,6 +81,16 @@ export function PlayerStrip(props: Props) {
   );
 }
 
+/** The dealer holds the deck. A glyph, not a letter, so it can never be read as an initial (handoff v3). */
+function DeckGlyph() {
+  return (
+    <svg className="strip__dealer" viewBox="0 0 16 16" role="img" aria-label="Dealer">
+      <rect x="2" y="4" width="9" height="11" rx="1.5" fill="#FCFAF4" stroke="#1F2723" strokeWidth="1.5" />
+      <rect x="5" y="1" width="9" height="11" rx="1.5" fill="#1F2723" />
+    </svg>
+  );
+}
+
 function CompactStrip({ seat, name, status, score, tone, held = 0, dealer, partner, active, statusFirst, emoji, considering }: Props) {
   const showHeld = held > 0 && !statusFirst;
   return (
@@ -94,9 +103,9 @@ function CompactStrip({ seat, name, status, score, tone, held = 0, dealer, partn
         <TeamMark tone={tone} initial={initialOf(name)} emoji={emoji} size={20} />
         <strong className="player__name" title={name}>{name}</strong>
         {partner && <span className="sr-only"> (your partner)</span>}
-        {dealer && <span className="strip__dealer" role="img" aria-label="Dealer">D</span>}
       </div>
       <div className="strip__bottom">
+        {dealer && <DeckGlyph />}
         {showHeld
           ? <Held seat={seat} name={name} held={held} considering={considering} className="player__held strip__held" />
           : <span className="strip__status">{status}</span>}

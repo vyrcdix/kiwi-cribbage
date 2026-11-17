@@ -1,21 +1,22 @@
 #!/usr/bin/env node
-// Bake a deck's court photos with the photo treatments (deck-photo-spec.md, design-handback-2 §1).
+// Bake a deck's court photos with the photo treatments (deck-photo-spec.md, design-handback-3 §1).
 //
 //   npm run bake -- public/decks/lily
-//   npm run bake -- <deck-folder> [--deck <id>] [--treatments tinted,tritone] [--quality 80]
+//   npm run bake -- <deck-folder> [--deck <id>] [--treatments tinted,mono] [--quality 80]
 //                                 [--stock #hex] [--black #hex] [--red #hex] [--blue #hex] [--green #hex]
 //
 // Reads the 4:5 court photos in the folder (JS.jpg, QH.jpg, KD.png … and AS if present; jpg,
 // jpeg, png or webp), centre-crops anything that is not 4:5, resizes down to at most 800 x 1000
 // (never up), and writes, beside them in <deck-folder>/baked/:
 //
-//   <CODE>.<treatment>.jpg       treated in the court's two-colour ink (spades and clubs black,
-//                                hearts and diamonds red)
-//   <CODE>.<treatment>.4c.jpg    treated in its four-colour ink, only where that ink differs
-//                                (diamonds blue, clubs green)
+//   <CODE>.tinted.jpg       tinted in the court's two-colour ink (spades and clubs black,
+//                           hearts and diamonds red)
+//   <CODE>.tinted.4c.jpg    tinted in its four-colour ink, only where that ink differs
+//                           (diamonds blue, clubs green)
+//   <CODE>.mono.jpg         mono: the deck's black ink, whatever the suit
 //
-// for each treatment (tinted and tritone by default; tinted is always baked, because the
-// mini-slot under 90 px always shows it). The originals are never touched. The treatment is
+// for each treatment asked for (tinted and mono by default; natural is the original and needs
+// no render). The originals are never touched. The treatment is
 // src/cards/photoTreatment.ts itself, run here through Node's TypeScript type stripping, so the
 // browser preview and the baked files are the same arithmetic. The deck's tokens (stock and
 // inks) come from src/cards/deckTokens.ts when the folder's name (or --deck) is a known deck,
@@ -48,7 +49,7 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2));
 if (!args._[0] || args.help !== undefined) {
-  console.error('Usage: npm run bake -- <deck-folder> [--deck <id>] [--treatments tinted,tritone] [--quality 80]');
+  console.error('Usage: npm run bake -- <deck-folder> [--deck <id>] [--treatments tinted,mono] [--quality 80]');
   process.exit(args._[0] ? 0 : 1);
 }
 const folder = resolve(args._[0]);
@@ -69,10 +70,10 @@ const deck = {
     green: args.green ?? base.inks.green,
   },
 };
-const treatments = [...new Set(['tinted', ...(args.treatments ?? 'tinted,tritone').split(',').map((t) => t.trim()).filter(Boolean)])];
+const treatments = [...new Set((args.treatments ?? 'tinted,mono').split(',').map((t) => t.trim()).filter(Boolean))];
 for (const t of treatments) {
-  if (t !== 'tinted' && t !== 'tritone') {
-    console.error(`Unknown treatment "${t}" (tinted or tritone; natural is the original)`);
+  if (t !== 'tinted' && t !== 'mono') {
+    console.error(`Unknown treatment "${t}" (tinted or mono; natural is the original)`);
     process.exit(1);
   }
 }
@@ -131,7 +132,8 @@ for (const code of [...COURT_CODES, 'AS']) {
   const variants = [{ ink: two, suffix: '' }];
   if (fourInk.toLowerCase() !== two.toLowerCase()) variants.push({ ink: fourInk, suffix: '.4c' });
   for (const t of treatments) {
-    for (const v of variants) {
+    // Mono is one render in the black ink, whatever the suit.
+    for (const v of t === 'mono' ? [{ ink: deck.inks.black, suffix: '' }] : variants) {
       const px = Buffer.from(data);
       treat(px, { treatment: t, ink: v.ink, stock: deck.stock });
       const file = join(outDir, `${code}.${t}${v.suffix}.jpg`);

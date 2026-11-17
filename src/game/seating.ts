@@ -415,3 +415,22 @@ export function summaryText(g: GameSummary): {
     tone: won ? 'is-won' : 'is-lost',
   };
 }
+
+/**
+ * The text on each player's owner chip (handoff v3): one letter, or two when a letter
+ * repeats within a team. Margaret B. and Margaret T. are MB and MT; Dave and Dot are
+ * Da and Do; two plain Margarets are M1 and M2.
+ */
+export function chipLabels(players: PlayerCount, names: string[]): string[] {
+  const letters = (name: string) => name.replace(/[^\p{L}\p{N}]/gu, '');
+  const first = (name: string) => (letters(name)[0] ?? '?').toUpperCase();
+  return names.map((name, i) => {
+    const clash = names.filter((q, j) => j !== i && teamOf(players, j as Seat) === teamOf(players, i as Seat) && first(q) === first(name));
+    if (!clash.length) return first(name);
+    const a = letters(name);
+    for (let k = 1; k < a.length; k++) {
+      if (clash.every((q) => (letters(q)[k] ?? '').toLowerCase() !== a[k].toLowerCase())) return first(name) + a[k];
+    }
+    return first(name) + (i + 1);
+  });
+}

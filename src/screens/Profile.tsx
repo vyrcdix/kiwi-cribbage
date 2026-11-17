@@ -1,6 +1,7 @@
 // You: name, picture, deck and four-colour suits (all kept on the server, so
 // they follow you to every device and to the table), your signed-in devices,
 // linking a new one by QR code, inviting someone, and signing out.
+import { play, unlock, useSoundOn } from '../game/sounds';
 import { type CSSProperties, type FormEvent, useState } from 'react';
 import { MAX_NAME, isSingleEmoji } from '../../shared/league';
 import { card } from '../../shared/cards';
@@ -154,10 +155,37 @@ function Decks() {
         </span>
       </label>
       <PaceSetting />
+      <SoundSetting />
       <p className="caption">You see your own deck at the table; everyone else sees theirs.</p>
       <a className="link" href={`/deck?d=${current}`} onClick={(e) => onLink(e, `/deck?d=${current}`)}>See the whole deck</a>
       {error && <p className="form-error" role="alert">{error}</p>}
     </div>
+  );
+}
+
+/** Sounds at the table: on by default, one switch, kept on this device (sound.md). */
+function SoundSetting() {
+  const [on, setOn] = useSoundOn();
+  return (
+    <label className="switch">
+      <input
+        type="checkbox"
+        checked={on}
+        onChange={(e) => {
+          setOn(e.target.checked);
+          if (e.target.checked) {
+            // Turning it on is a tap, so audio can start; the snap says it worked.
+            unlock();
+            play('snap', { at: 0.05 });
+          }
+        }}
+      />
+      <span className="switch__track" aria-hidden="true" />
+      <span className="switch__text">
+        <strong>Sound</strong>
+        <span>Cards, pegs and the count at the table · this device</span>
+      </span>
+    </label>
   );
 }
 

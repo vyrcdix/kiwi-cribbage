@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cabbage sound board</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Besley:wght@700;800&family=Familjen+Grotesk:wght@400;500;600;700&display=swap">
+<style>
+  :root { --cloth:#F1EBDA; --enamel:#FCFAF4; --ink:#1F2723; --soft:#4A554F; --edge:#CFC8B6; --green:#2F6B45; --tomato:#BE3228; --butter:#F6E3A6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 16px 48px; color: var(--ink); font: 17px/1.4 'Familjen Grotesk', system-ui, sans-serif;
+    background: repeating-linear-gradient(0deg, rgba(47,107,69,.06) 0 14px, transparent 14px 28px), repeating-linear-gradient(90deg, rgba(47,107,69,.06) 0 14px, transparent 14px 28px), var(--cloth); }
+  main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  h1 { margin: 0; font-size: 34px; letter-spacing: -0.02em; line-height: 1.05; }
+  h2 { margin: 0 0 4px; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--soft); }
+  p { margin: 0; }
+  .lead { color: var(--soft); }
+  .panel { background: var(--enamel); border: 1.5px solid var(--ink); border-radius: 18px; padding: 18px; box-shadow: inset 0 0 0 5px var(--enamel), inset 0 0 0 6.5px var(--tomato); display: flex; flex-direction: column; gap: 4px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--edge); flex-wrap: wrap; }
+  .row:first-of-type { border-top: 0; }
+  .row .what { flex: 1 1 220px; min-width: 0; }
+  .row .what strong { display: block; }
+  .row .what span { font-size: 14px; color: var(--soft); }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1.5px solid var(--ink); background: var(--enamel); color: var(--ink); font: 700 16px 'Familjen Grotesk', system-ui, sans-serif; cursor: pointer; }
+  button:active { transform: scale(.97); }
+  button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+  button.go { background: var(--green); border-color: var(--green); color: var(--enamel); }
+  button[aria-pressed="true"] { background: var(--butter); }
+  .pick { font-size: 12px; font-weight: 600; color: var(--soft); }
+  .bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  input[type=range] { flex: 1 1 160px; accent-color: var(--green); height: 44px; }
+  #picks { font: 700 16px 'Besley', Georgia, serif; }
+  #status { font-size: 14px; color: var(--soft); min-height: 1.4em; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Sound board</h1>
+    <p class="lead">Every sound is made in the browser; there are no audio files. Where a sound has two versions, tap each and keep the one you like. Turn your phone's ringer on.</p>
+  </header>
+
+  <section class="panel" aria-label="Volume and picks">
+    <div class="bar">
+      <label for="vol"><strong>Volume</strong></label>
+      <input id="vol" type="range" min="0" max="1" step="0.05" value="0.6">
+    </div>
+    <div class="bar">
+      <p>Your picks: <span id="picks"></span></p>
+      <button id="copy" type="button">Copy picks</button>
+    </div>
+    <p id="status" role="status"></p>
+  </section>
+
+  <section class="panel" aria-label="Single sounds">
+    <h2>One at a time</h2>
+    <div id="rows"></div>
+  </section>
+
+  <section class="panel" aria-label="Moments">
+    <h2>In sequence, at game pace</h2>
+    <div id="scenes"></div>
+  </section>
+</main>
+
+<script type="module">
+import { play, unlock, setVolume, setVariant, VARIANT } from './sounds.js';
+
+const ROWS = [
+  { name: 'snap', title: 'Card lands', when: 'A card arriving on the table or in the crib', variants: [['soft', 'Soft, on oilcloth'], ['crisp', 'Crisp']], pick: 'soft' },
+  { name: 'deal', title: 'Dealt card', when: 'Each card of the deal; quieter than a played card' },
+  { name: 'flip', title: 'Starter turns', when: 'The cut: a swish, then the card lands' },
+  { name: 'peg', title: 'Peg seats', when: 'A peg dropping into its hole', variants: [['wood', 'Wooden peg'], ['pin', 'Metal pin']], pick: 'wood' },
+  { name: 'pegTick', title: 'Peg passing', when: 'Every fifth hole on a long move; meant to be barely there' },
+  { name: 'tick', title: 'Count step', when: 'Each phrase of the spoken count', variants: [['rising', 'Climbs with each step'], ['flat', 'Same every time']], pick: 'rising', steps: 4 },
+  { name: 'ting', title: 'Score', when: 'A score in pegging, and the total of a count', variants: [['mug', 'Enamel mug'], ['bowl', 'Lower, a bowl']], pick: 'mug' },
+  { name: 'knock', title: 'Go', when: 'A knuckle on the table, twice' },
+  { name: 'win', title: 'Win', when: 'The peg reaches 121' },
+  { name: 'thud', title: 'The kiwi lands', when: 'A skunk: the kiwi drops onto its plinth' },
+  { name: 'stamp', title: 'Skunked', when: 'The plate stamps under the kiwi' },
+  { name: 'twentyNine', title: 'A 29', when: 'The kitchen timer goes off; used nowhere else' },
+];
+
+const SCENES = [
+  { title: 'The deal', run() { for (let i = 0; i < 12; i++) play('deal', { at: i * 0.07 }); play('flip', { at: 1.2 }); } },
+  { title: 'Pegging: fifteen for two', run() { play('snap'); play('snap', { at: 0.9 }); play('ting', { at: 1.0 }); play('peg', { at: 1.5 }); play('peg', { at: 1.57 }); } },
+  { title: 'Pegging: go', run() { play('snap'); play('knock', { at: 0.8 }); play('peg', { at: 1.5 }); } },
+  { title: 'The count: eight', run() { [0, 1, 2].forEach((s) => play('tick', { step: s, at: s * 1.4 })); play('ting', { at: 4.2 }); for (let i = 1; i <= 8; i++) if (i % 5 === 0) play('pegTick', { at: 4.9 + i * 0.03 }); play('peg', { at: 5.3 }); } },
+  { title: 'A long peg move: 24', run() { for (let i = 5; i < 24; i += 5) play('pegTick', { at: i * 0.036 }); play('peg', { at: 0.93 }); } },
+  { title: 'Win, with a skunk', run() { play('peg'); play('win', { at: 0.2 }); play('thud', { at: 1.7 }); play('stamp', { at: 2.35 }); } },
+  { title: 'A 29', run() { for (let s = 0; s < 8; s++) play('tick', { step: s, at: s * 0.45 }); play('twentyNine', { at: 3.9 }); } },
+];
+
+const $ = (id) => document.getElementById(id);
+const status = $('status');
+const picks = { snap: VARIANT.snap, peg: VARIANT.peg, tick: VARIANT.tick, ting: VARIANT.ting };
+
+function ready() {
+  const ok = unlock();
+  if (!ok) status.textContent = 'This browser has no Web Audio, so nothing will play here.';
+  return ok;
+}
+function showPicks() {
+  $('picks').textContent = Object.entries(picks).map(([k, v]) => `${k}: ${v}`).join(' · ');
+}
+function fire(row) {
+  if (!ready()) return;
+  if (row.steps) for (let s = 0; s < row.steps; s++) play(row.name, { step: s, at: s * 0.35 });
+  else play(row.name);
+}
+
+for (const row of ROWS) {
+  const el = document.createElement('div');
+  el.className = 'row';
+  const what = document.createElement('div');
+  what.className = 'what';
+  what.innerHTML = `<strong></strong><span></span>`;
+  what.firstChild.textContent = row.title;
+  what.lastChild.textContent = row.when;
+  const btns = document.createElement('div');
+  btns.className = 'btns';
+  if (row.variants) {
+    for (const [key, label] of row.variants) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.setAttribute('aria-pressed', String(picks[row.name] === key));
+      b.addEventListener('click', () => {
+        picks[row.name] = key;
+        setVariant(row.name, key);
+        btns.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        showPicks();
+        fire(row);
+      });
+      btns.append(b);
+    }
+    const note = document.createElement('span');
+    note.className = 'pick';
+    note.textContent = `Designer's pick: ${row.variants.find(([k]) => k === row.pick)[1].toLowerCase()}`;
+    what.append(document.createElement('br'), note);
+  } else {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = 'Play';
+    b.addEventListener('click', () => fire(row));
+    btns.append(b);
+  }
+  el.append(what, btns);
+  $('rows').append(el);
+}
+
+for (const scene of SCENES) {
+  const el = document.createElement('div');
+  el.className = 'row';
+  const what = document.createElement('div');
+  what.className = 'what';
+  const s = document.createElement('strong');
+  s.textContent = scene.title;
+  what.append(s);
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'go';
+  b.textContent = 'Play';
+  b.addEventListener('click', () => { if (ready()) scene.run(); });
+  const btns = document.createElement('div');
+  btns.className = 'btns';
+  btns.append(b);
+  el.append(what, btns);
+  $('scenes').append(el);
+}
+
+$('vol').addEventListener('input', (e) => { ready(); setVolume(Number(e.target.value)); });
+$('copy').addEventListener('click', async () => {
+  const text = 'Sound picks: ' + $('picks').textContent;
+  try { await navigator.clipboard.writeText(text); status.textContent = 'Copied. Paste it into the chat.'; }
+  catch { status.textContent = text; }
+});
+showPicks();
+</script>
+</body>
+</html>

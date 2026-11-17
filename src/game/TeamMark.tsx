@@ -14,7 +14,7 @@ export function TeamMark({
   tone, initial, emoji, size = 20, label,
 }: {
   tone: number;
-  /** The player's initial. Mustard carries no letter (handoff v2): the diamond is the cue. */
+  /** The player's initial, or a two-character chip label (seating.chipLabels), which widens the disc to a pill. Mustard carries no letter (handoff v2): the diamond is the cue. */
   initial?: string;
   /** The player's league avatar emoji, drawn inside the marker in place of the initial. */
   emoji?: string | null;
@@ -29,6 +29,7 @@ export function TeamMark({
       className="mark"
       data-team={team}
       data-emoji={emoji ? '' : undefined}
+      data-wide={!emoji && team !== 'mustard' && initial && initial.length > 1 ? '' : undefined}
       style={{ ['--m' as string]: `${size}px` }}
       {...(label ? { role: 'img', 'aria-label': label } : { 'aria-hidden': true })}
     >

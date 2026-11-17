@@ -31,7 +31,7 @@ describe('countAloud', () => {
     const c = count([[1, 0], [3, 1], [5, 2], [7, 3]], [11, 0]); // 2 4 6 8, starter Q
     expect(c.steps).toEqual([]);
     expect(c.total).toBe(0);
-    expect(c.totalPhrase).toBe('Nineteen — nothing this time');
+    expect(c.totalPhrase).toBe('Nineteen. Nothing this time.');
   });
 
   it('the 29', () => {

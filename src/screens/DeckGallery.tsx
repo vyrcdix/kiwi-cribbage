@@ -66,15 +66,15 @@ export function DeckGallery() {
 }
 
 const TREATMENTS: { id: PhotoTreatment; name: string; note: string }[] = [
-  { id: 'natural', name: 'Natural', note: 'The photos as they are.' },
-  { id: 'tinted', name: 'Tinted', note: 'Colour kept at 65%, pulled 22% toward the suit’s ink. The house default.' },
-  { id: 'tritone', name: 'Tritone', note: 'Shadow ink, suit ink, card stock. For photos separated by light and dark.' },
+  { id: 'natural', name: 'Natural', note: 'The photos as they are. The default.' },
+  { id: 'tinted', name: 'Tinted', note: 'Nearly all the colour kept, with the suit’s ink pushed into the shadows.' },
+  { id: 'mono', name: 'Mono', note: 'One ink for every suit, black to card stock. For a black-and-white deck or old photos.' },
 ];
 
 /**
  * The owner's choice of treatment, previewed live on all twelve courts at full size
- * and at table size (deck-photo-spec.md). A preview only: nothing is saved. At table
- * size the mini-slot always shows the tinted render, whatever the treatment.
+ * and at table size (deck-photo-spec.md). A preview only: nothing is saved. The table
+ * size shows the same render as the full face.
  */
 function TreatmentPreview({ deck }: { deck: DeckSpec }) {
   const [t, setT] = useState<PhotoTreatment>(deck.photoTreatment);
@@ -101,9 +101,9 @@ function TreatmentPreview({ deck }: { deck: DeckSpec }) {
       </div>
       <h3 className="eyebrow">Table size</h3>
       <div className="treat__grid treat__grid--table">
-        {courts.map((c) => <CardView key={c} card={c} fluid />)}
+        {courts.map((c) => <CardView key={c} card={c} fluid treatment={t} />)}
       </div>
-      <p className="caption">At table size the photo is about 26 px wide and always shows the tinted render, whatever the treatment: tritone turns to a smudge that small.</p>
+      <p className="caption">At table size the photo is about 26 px wide and shows the same render as the full face.</p>
     </section>
   );
 }

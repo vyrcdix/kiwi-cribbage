@@ -437,16 +437,6 @@ button.seat:disabled { cursor: default; color: inherit; }
 /* the show */
 .stage__row--show { --w: var(--show-w); gap: 6px; align-items: flex-end; padding-top: 8px; flex: none; }
 .show__starter { margin-left: 8px; }
-.combos { align-self: stretch; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; flex: 0 1 auto; scrollbar-width: none; }
-.combos::-webkit-scrollbar { display: none; }
-.combos li { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1.5px solid transparent; border-radius: 8px; flex: none; animation: line-in 160ms var(--ease-out); }
-@keyframes line-in { from { opacity: 0; transform: translateY(6px); } }
-.combos li span { flex: 1; color: var(--c-ink-soft); min-width: 0; }
-.combos li strong { color: var(--c-ink); font-weight: 600; }
-.combos li b { font-family: var(--font-num); font-size: 20px; color: var(--c-ink-soft); }
-.combos li[aria-current] { padding-block: 8px; background: var(--c-butter-soft); border-color: var(--c-ink); }
-.combos li[aria-current] span, .combos li[aria-current] b { color: var(--c-ink); }
-.combos li[aria-current] b { font-size: 30px; font-weight: 800; line-height: 1; }
 
 /* the 29 */
 .twentynine { display: flex; flex-direction: column; align-items: center; gap: 4px; }
@@ -564,9 +554,6 @@ button.seat:disabled { cursor: default; color: inherit; }
   .stage__row--tight { --w: 28px; }
   .stage__row--show { --w: 50px; }
   .cut { --w: 80px; }
-  .combos li { padding: 4px 10px; }
-  .combos li[aria-current] { padding-block: 5px; }
-  .combos li[aria-current] b { font-size: 24px; }
   .trophy { --t: 66px; }
   .trophy__plate { height: 26px; font-size: 12px; }
   .over__text h1 { font-size: 26px; }
@@ -653,7 +640,7 @@ button.seat:disabled { cursor: default; color: inherit; }
   .player__held > span[data-considering] { transform: none; opacity: 0.6; }
   .cut__lifted, .cut__lifted.is-lifted { transition: none; }
   .cut__starter, .stage .slot > .card.is-flipping, .is-flipping .table__hand .card,
-  .fan__card, .twentynine__fan > span, .combos li, .table__prompt p[data-kind='call'],
+  .fan__card, .twentynine__fan > span, .table__prompt p[data-kind='call'],
   .count__new, .board__tab.is-pulsing {
     animation: stage-in var(--dur-reduced) linear both;
   }
@@ -685,8 +672,8 @@ button.seat:disabled { cursor: default; color: inherit; }
 .mark[data-team='mustard'] .mark__emoji { font-size: calc(var(--m) * 0.5); }
 
 /* Compact strips: one two-line cell per other player, in the same 56 px zone.
-   Line one: marker, name (all the width that is left), dealer disc. Line two: the
-   cards held or a short status, then the score. */
+   Line one: marker and name, nothing else. Line two: the dealer's deck glyph, the
+   cards held or a short status, then the score (handoff v3). */
 .table__opps--compact { gap: 6px; }
 .player.strip {
   flex: 1 1 0; min-width: 0; height: var(--zone-player); padding: 5px 6px;
@@ -697,11 +684,8 @@ button.seat:disabled { cursor: default; color: inherit; }
 .player.strip[data-active] { border-color: var(--c-ink); background: var(--c-enamel); } /* whose turn it is */
 .strip__top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .strip__top .player__name { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; line-height: 1.2; }
-.strip__dealer {
-  width: 16px; height: 16px; flex: none; display: grid; place-items: center; border-radius: 50%;
-  background: var(--c-ink); color: var(--c-enamel); font-size: 10px; font-weight: 700;
-}
-.strip__bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; min-height: 22px; min-width: 0; }
+.strip__dealer { width: 14px; height: 14px; flex: none; }
+.strip__bottom { display: flex; align-items: flex-end; gap: 4px; min-height: 22px; min-width: 0; }
 .strip__bottom .player__score { margin-left: auto; min-width: 0; font: 800 22px/1 var(--font-num); text-align: right; }
 .strip__held { --w: 16px; }
 .strip__status { min-width: 0; font-size: 12px; line-height: 1.2; color: var(--c-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -716,12 +700,14 @@ button.seat:disabled { cursor: default; color: inherit; }
   .player--you[data-active] { border-color: var(--c-ink); background: var(--c-enamel); }
 }
 
-/* Owner chips on played cards (three and four players): theirs sit high with the chip
-   above; yours sit lower with the chip below. Two players keep the plain bars. */
-.played__card--chip { gap: 4px; }
+/* Owner chips on played cards (three and four players): every chip sits below its card,
+   so theirs start at the top of the row and yours start lower by --drop, which steps
+   20 / 10 with the count size (handoff v3). Two players keep the plain bars. */
+.played__card--chip { gap: 4px; flex-direction: column; }
 .played__card--chip::before, .played__card--chip::after { content: none; }
-.played__card--chip[data-mine] { margin-top: 40px; flex-direction: column-reverse; }
-.table[data-players='3'] .played, .table[data-players='4'] .played { min-height: calc(var(--played-w) * 1.4 + 60px); }
+.played__card--chip[data-mine] { margin-top: var(--drop, 20px); }
+.mark[data-wide] { width: auto; min-width: var(--m); padding: 0 3px; border-radius: calc(var(--m) / 2); letter-spacing: -0.02em; } /* two-letter chips */
+.table[data-players='3'] .played, .table[data-players='4'] .played { min-height: calc(var(--played-w) * 1.4 + 40px); }
 
 /* The show tracker for four or five steps: one line over a segment per step. */
 .tracker { align-self: center; width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -746,50 +732,39 @@ button.seat:disabled { cursor: default; color: inherit; }
 
 .show { flex: 1; min-height: 0; align-self: stretch; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
 .show[data-playing] { cursor: pointer; }
-.show .combos { align-self: stretch; flex: 0 1 auto; }
-.show .combos li { padding: 3px 10px; font-size: 15px; animation: line-in 200ms var(--ease-out); }
-.show .combos li strong { font-weight: 600; }
-.show .combos li small { font-family: var(--font-num); font-size: 12.5px; color: var(--c-ink-soft); margin-left: 4px; white-space: nowrap; }
-.show .combos li b { font-size: 16px; }
-.saying {
-  align-self: stretch; flex: none; display: flex; align-items: center; gap: 12px; min-height: 64px;
-  padding: 6px 8px 6px 14px; border-radius: 12px; border: 1.5px solid transparent;
-  transition: background-color 160ms linear, border-color 160ms linear;
+/* What has been said, one quiet line; what is being said now, large, with the reason
+   under it; and the running total in the butter box (handoff v3 Count.jsx). */
+.count-said { align-self: stretch; margin: 0; font-size: 15px; line-height: 1.35; color: var(--c-ink-soft); }
+.count-now { align-self: stretch; display: flex; align-items: center; gap: 14px; }
+.count-now__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; animation: stage-in 120ms linear; } /* a cross-fade, no slide */
+.count-now__phrase { margin: 0; font-size: 26px; font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; text-wrap: balance; }
+.count-now__reason { margin: 0; font-size: 15px; color: var(--c-ink-soft); }
+.count-total {
+  width: 80px; height: 80px; flex: none; box-sizing: border-box; display: grid; place-items: center; overflow: hidden;
+  background: var(--c-butter-soft); border: 1.5px solid var(--c-ink); border-radius: 14px;
+  font: 800 54px/1 var(--font-num); font-variant-numeric: tabular-nums;
+  transition: background-color 120ms linear;
 }
-.saying[data-state='step'] { background: var(--c-butter-soft); border-color: var(--c-ink); }
-.saying[data-state='total'] { border-color: var(--c-ink); }
-.saying__text { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-.saying__phrase { font-size: 20px; font-weight: 700; line-height: 1.15; animation: line-in 200ms var(--ease-out); }
-.saying[data-state='wait'] .saying__phrase { color: var(--c-ink-soft); font-weight: 600; }
-.saying__reason { font: 600 15px/1.2 var(--font-num); color: var(--c-ink-soft); }
-.saying__again {
-  margin: 2px 0 -6px -2px; padding: 6px 2px; min-height: 32px; border: 0; background: none; cursor: pointer;
-  color: var(--c-green); font-weight: 700; font-size: 14px; text-decoration: underline; text-underline-offset: 3px;
-}
-.saying__total { flex: none; min-width: 1.2em; text-align: right; font: 800 60px/0.9 var(--font-num); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; animation: tick-in 220ms var(--ease-out); }
+.count-total[data-final] { background: var(--c-butter); }
+.count-total > span { animation: tick-in 120ms var(--ease-out); }
 @keyframes tick-in { from { transform: translateY(35%); opacity: 0; } }
+.btn--icon { width: 44px; min-height: 44px; padding: 0; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--c-enamel); color: var(--c-ink); border: 1.5px solid var(--c-ink); }
 
 @container top (max-height: 370px) {
   .show { gap: 8px; }
-  .saying { min-height: 56px; }
-  .saying__phrase { font-size: 18px; }
-  .saying__total { font-size: 48px; }
-  .played__card--chip[data-mine] { margin-top: 30px; }
-  .table[data-players='3'] .played, .table[data-players='4'] .played { min-height: calc(46px * 1.4 + 50px); }
+  .played__card--chip { --drop: 16px; }
+  .table[data-players='3'] .played, .table[data-players='4'] .played { min-height: calc(46px * 1.4 + 36px); }
 }
 @container top (max-height: 310px) {
   .table[data-phase='show'] .toprow { display: none; } /* the starter is in the show's row */
   .show { gap: 6px; }
-  .saying { min-height: 50px; padding-block: 4px; }
-  .saying__phrase { font-size: 17px; }
-  .saying__reason { font-size: 13px; }
-  .saying__total { font-size: 42px; }
-  .show .combos li { padding-block: 2px; font-size: 14px; }
-  /* No height to spare at 360 x 740: your cards sit level with theirs and the chip below says whose. */
-  .played__card--chip { gap: 3px; }
-  .played__card--chip[data-mine] { margin-top: 19px; }
+  .count-now__phrase { font-size: 22px; }
+  .count-now__text { gap: 4px; }
+  .count-said, .count-now__reason { font-size: 14px; }
+  .count-total { width: 64px; height: 64px; border-radius: 12px; font-size: 44px; }
+  .played__card--chip { gap: 3px; --drop: 10px; }
   .table[data-players='3'][data-phase='pegging'] .stage, .table[data-players='4'][data-phase='pegging'] .stage { gap: 4px; }
-  .table[data-players='3'] .played, .table[data-players='4'] .played { min-height: calc(42px * 1.4 + 38px); }
+  .table[data-players='3'] .played, .table[data-players='4'] .played { min-height: calc(42px * 1.4 + 29px); }
 }
 
 /* "Go" said aloud, in the prompt line. */
@@ -825,12 +800,12 @@ button.seat:disabled { cursor: default; color: inherit; }
   .strip__status { font-size: 14px; }
   .player__home { width: 40px; height: 40px; margin: 0; }
   .tracker p { font-size: 18px; }
-  .saying__total { font-size: 72px; }
-  .saying__phrase { font-size: 24px; }
+  .count-now__phrase { font-size: 30px; }
+  .count-said, .count-now__reason { font-size: 17px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   /* The count keeps its pace; each step only fades. */
-  .saying__phrase, .saying__total, .show .combos li { animation: stage-in var(--dur-reduced) linear both; }
-  .player.strip, .player--you, .saying { transition: none; }
+  .count-now__text, .count-total > span { animation: stage-in var(--dur-reduced) linear both; }
+  .player.strip, .player--you, .count-total { transition: none; }
 }

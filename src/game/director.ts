@@ -12,6 +12,8 @@ import type { Card } from '../../shared/cards';
 import { type GameEvent, type Phase, type PlayerView, type Seat, teamOf } from '../../shared/game';
 import { scoreCall } from './callouts';
 import { haptic } from './haptics';
+import { reducedMotion } from './motion';
+import { play } from './sounds';
 import { DUR, onSkip } from './motion';
 import { litCards } from './pegging';
 import { toneOfSeat } from './seating';
@@ -107,11 +109,14 @@ function buildScript(events: GameEvent[], view: PlayerView, prev: Memory, ctx: C
 
   if (starter) {
     // Lift (160) + flip (320) + hold (600), then deck and starter go home.
-    push({ stage: 'cut', cutReveal: true }, 160 + DUR.flip + 600);
+    // The swish ends and the snap lands as the starter finishes turning.
+    push({ stage: 'cut', cutReveal: true }, 160 + DUR.flip + 600, () => play('flip', { at: reducedMotion() ? 0 : (160 + DUR.flip) / 1000 - 0.12 }));
     if (heels) {
       const call = scoreCall(heels, ctx.you, ctx.names);
-      push({ stage: 'cut', cutReveal: true, lit: [starter.card], call, callTone: tone(heels.seat) }, DUR.scoreHold, () =>
-        haptic(heels.seat === ctx.you || teamOf(n, heels.seat) === mine ? 'medium' : 'light'));
+      push({ stage: 'cut', cutReveal: true, lit: [starter.card], call, callTone: tone(heels.seat) }, DUR.scoreHold, () => {
+        haptic(heels.seat === ctx.you || teamOf(n, heels.seat) === mine ? 'medium' : 'light');
+        play('ting');
+      });
       apply(heels);
       push({ stage: 'cut', cutReveal: true, lit: [starter.card], call, callTone: tone(heels.seat) }, 'seat');
     }
@@ -133,13 +138,17 @@ function buildScript(events: GameEvent[], view: PlayerView, prev: Memory, ctx: C
     const scorerMine = teamOf(n, peg[peg.length - 1].seat) === mine;
     push({ stage: 'pegging', frozen: true, lit: litCards(peg.flatMap((e) => e.items)), call, callTone }, DUR.scoreHold, () => {
       if (scorerMine) haptic('medium');
+      // A go that scores: the knock, then the mug for the point.
+      const knocked = Boolean(lastGo) && peg.some((e) => e.items.some((it) => it.kind === 'go'));
+      if (knocked) play('knock');
+      play('ting', { at: knocked ? 0.4 : 0 });
     });
     peg.forEach(apply);
     push({ stage: 'pegging', frozen: true, call, callTone }, 'seat');
     // Let the call be read, then the ended count slides to the "last count" row.
     push({ stage: 'pegging', frozen: true, call, callTone }, 450);
   } else if (lastGo && view.phase === 'peg') {
-    push({ call: said(lastGo), callTone: tone(lastGo.seat), callScores: false }, 1100);
+    push({ call: said(lastGo), callTone: tone(lastGo.seat), callScores: false }, 1100, () => play('knock'));
   }
 
   if (newShow) {

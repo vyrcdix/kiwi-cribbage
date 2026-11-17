@@ -26,7 +26,8 @@ import {
   compactStatus, cribLabel, discardPrompt, listNames, othersClockwise, overCopy, relationOf, showStages, showStatusOf,
   showStepLabels, statusLine, teamName, teamsInOrder, toneOf, toneOfSeat, waitingText,
 } from './seating';
-import { CutStage, DealStage, OverStage, PeggingStage, ShowStage, ShowTracker, Tally, type TallyColumn, TopRow } from './stages';
+import { CountAgain, CutStage, DealStage, OverStage, PeggingStage, ShowStage, ShowTracker, Tally, type TallyColumn, TopRow } from './stages';
+import { play as sound, unlock } from './sounds';
 import { teamColourOf } from './TeamMark';
 import { CardView } from '../cards/CardView';
 import { navigate } from '../lib/router';
@@ -43,6 +44,10 @@ interface Props {
   rematch: { busy: boolean; error: string | null; go: () => void };
   /** By seat: each player's league avatar emoji, if they have one. */
   emojis?: (string | null)[];
+  /** Presence, by seat: the face-down card each other player is considering (it lifts). */
+  considering?: (number | null)[];
+  /** Presence: tell the table which of your cards you are considering (null = none). */
+  consider?: (card: Card | null) => void;
   /** Your next queued fixture, offered at game over ("finishing a game offers you the next"). */
   next?: { label: string; busy: boolean; error: string | null; go: () => void } | null;
 }
@@ -56,7 +61,8 @@ interface Props {
  * goes to the end, `restart` counts again from the start. `onDone` fires once per
  * show, when the first count ends; a recount never fires it again.
  */
-function useShowSequence(key: string | null, count: number, running: boolean, is29: boolean, onDone: () => void) {
+function useShowSequence(key: string | null, kinds: string[], running: boolean, is29: boolean, onDone: () => void) {
+  const count = kinds.length;
   const [pace] = usePace();
   const T = countTiming(pace);
   // i: -1 entering, 0 … count-1 a step, count the total beat. playing: the count is running.
@@ -92,7 +98,10 @@ function useShowSequence(key: string | null, count: number, running: boolean, is
       ms = reducedMotion() ? DUR.reduced : 260;
       to = () => setSt((s) => ({ ...s, i: 0, gap: count > 0 }));
     } else if (st.i < count) {
-      ms = T.step - T.gap;
+      // Inside a run of the same kind, the third and later steps go a little quicker
+      // (handoff v3 §4): eight fifteens take 8 s instead of 11.
+      const again = st.i >= 2 && kinds[st.i] === kinds[st.i - 1] && kinds[st.i] === kinds[st.i - 2];
+      ms = (again ? Math.min(T.step, 900) : T.step) - T.gap;
       to = () => setSt((s) => ({ ...s, i: s.i + 1, gap: true }));
     } else {
       ms = is29 ? 0 : T.total;
@@ -103,6 +112,15 @@ function useShowSequence(key: string | null, count: number, running: boolean, is
     const t = setTimeout(to, ms);
     return () => clearTimeout(t);
   }, [st, key, count, is29, T.gap, T.step, T.total, finish]);
+
+  // Sound (sound.md): a tick for each phrase as it is said, each a note higher; the mug
+  // for the total; the kitchen timer as the 29 appears. Skipping to the total is silent.
+  useEffect(() => {
+    if (!st.playing || st.key !== key || st.gap) return;
+    if (st.nine) sound('twentyNine', { at: 0.3 });
+    else if (st.i >= 0 && st.i < count) sound('tick', { step: st.i });
+    else if (st.i === count && count > 0 && !is29) sound('ting');
+  }, [st.i, st.gap, st.nine, st.playing, st.key]);
 
   const cur = useRef(st);
   cur.current = st;
@@ -156,7 +174,7 @@ const cribRect = (): DOMRect | null => {
   return new DOMRect(r.right - w, r.top, w, h);
 };
 
-export function Table({ msg, view, names, status, pending, act, beat, toast, rematch, emojis, next }: Props) {
+export function Table({ msg, view, names, status, pending, act, beat, toast, rematch, emojis, considering, consider, next }: Props) {
   const you = view.you;
   const n = view.players;
   const mine = teamOf(n, you);
@@ -187,8 +205,10 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
       return x;
     });
     if (team === mine) haptic('light');
+    // One sound per move, as the peg seats; the winning peg rings instead.
+    sound(score >= view.target ? 'win' : 'peg');
     seated();
-  }, [mine, seated]);
+  }, [mine, seated, view.target]);
   const boardScores = dir.board?.scores ?? view.scores;
   const boardBack = dir.board?.back ?? view.back;
 
@@ -242,6 +262,7 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
   const send = () => {
     for (const c of sel) rememberRect(`disc:${c}`, document.querySelector(`[data-card="${c}"] .card`));
     setSent({ hand: view.handNo, cards: sel, down: false });
+    sound('snap', { at: reducedMotion() ? 0 : 0.18 }); // as they land in the slots
     act({ t: 'discard', cards: sel });
   };
 
@@ -255,7 +276,12 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
     if (beat.fresh || handled.current === beat.id) return;
     handled.current = beat.id;
     const table = tableRef.current;
-    for (const e of beat.events) if (e.t === 'play' && e.seat === you) haptic('light');
+    for (const e of beat.events) {
+      if (e.t !== 'play') continue;
+      if (e.seat === you) haptic('light');
+      // The card flies to the table for 200 ms; the snap is its landing.
+      sound('snap', { at: reducedMotion() ? 0 : 0.2 });
+    }
 
     // Others' discards slide from their strip to the crib.
     const to = cribRect();
@@ -267,7 +293,7 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
       const w = to.width;
       const src = new DOMRect(from.left, from.top, w * 0.5, w * 0.7);
       for (let k = 0; k < need; k++) {
-        if (fly({ card: null, from: src, to, delay: k * 80, duration: 260, easing: CSS_EASE.inOut, onLand: () => setFlying((f) => Math.max(0, f - 1)) })) launched++;
+        if (fly({ card: null, from: src, to, delay: k * 80, duration: 260, easing: CSS_EASE.inOut, onLand: () => { sound('snap'); setFlying((f) => Math.max(0, f - 1)); } })) launched++;
       }
     }
     if (launched) setFlying((f) => f + launched);
@@ -303,6 +329,8 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
           card: null, from: deck, to: rect, delay: i * 60, duration: DUR.card,
           release: seat === you ? released : undefined,
           onLand: () => {
+            // With three or four at the table, only your own cards sound.
+            if (n === 2 || seat === you) sound('deal');
             holder.setAttribute('data-landed', '');
             if (seat === you && --mineLeft === 0) setTimeout(finish, 60);
           },
@@ -321,7 +349,8 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
 
   // A tap anywhere skips running animations to their end state.
   useEffect(() => {
-    const onDown = () => skipAnimations();
+    // The first tap also unlocks audio: browsers need a gesture.
+    const onDown = () => { unlock(); skipAnimations(); };
     window.addEventListener('pointerdown', onDown, true);
     return () => window.removeEventListener('pointerdown', onDown, true);
   }, []);
@@ -331,9 +360,9 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
   const showKey = result && (view.phase === 'show' || view.phase === 'over') ? `${view.handNo}-${view.showStep}` : null;
   const lines = useMemo(() => (result ? showLines(result) : []), [result]);
   const is29 = result?.total === 29;
-  const seq = useShowSequence(showKey, lines.length, dir.showRun !== null && dir.showRun === showKey, is29, showDone);
+  const kinds = useMemo(() => lines.map((l) => l.kind), [lines]);
+  const seq = useShowSequence(showKey, kinds, dir.showRun !== null && dir.showRun === showKey, is29, showDone);
   const showTitle = result ? `${result.seat === you ? 'Your' : possessive(names[result.seat])} ${result.crib ? 'crib' : 'hand'}` : '';
-  const runningTotal = seq.current >= lines.length ? result?.total ?? 0 : seq.current >= 0 ? lines[seq.current].running : 0;
 
   // Spoken announcements for screen readers (the starter, a go, a new deal, the win).
   const spoken = useMemo(
@@ -362,11 +391,16 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
     if (stage !== 'over' || overSeen.current) return;
     overSeen.current = true;
     if (won) haptic('heavy');
+    // The kiwi drops 220 ms in and touches down 62% through its 500 ms fall.
+    if (!reducedMotion()) sound('thud', { at: 0.22 + 0.31 });
     // The plate stamps after the plinth rises and the kiwi drops: heavy, both players.
-    if (skunkLevel > 0) setTimeout(() => haptic('heavy'), 220 + 500 + 140);
+    if (skunkLevel > 0) {
+      setTimeout(() => haptic('heavy'), 220 + 500 + 140);
+      sound('stamp', { at: reducedMotion() ? 0.1 : 0.87 });
+    }
   }, [stage, won, skunkLevel]);
 
-  // ---- the prompt: one line saying what to do now, and at most one button ----
+  // ---- the prompt: one line saying what to do now, and at most one button (two at the show: Count again, then Continue) ----
   const myTurn = view.phase === 'peg' && view.turn === you;
   const iCut = view.phase === 'cut' && cutter === you;
   const unplayable = myTurn ? view.hand.filter((c) => view.count + value(c) > 31) : [];
@@ -388,7 +422,7 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
     } else text = waiting;
   } else if (view.phase === 'show' || stage === 'show') {
     const counting = seq.counting;
-    text = counting ? `${showTitle} · ${runningTotal}` : `${showTitle}: ${result?.total === 0 ? 'nineteen' : result?.total ?? 0}`;
+    text = counting ? `${showTitle} · tap to step on` : `${showTitle}: ${result?.total === 0 ? 'nineteen' : result?.total ?? 0}`;
     if (view.phase === 'show') {
       if (view.acks[you] && !counting) text = waiting;
       else if (counting && !view.acks[you]) {
@@ -409,6 +443,8 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
   }
   // The 29's hold cannot be skipped: Continue stays in place but waits.
   if (stage === 'show' && seq.nine && button) button = { ...button, disabled: true };
+  // Count again sits before Continue once a count with something in it has finished.
+  const recount = stage === 'show' && !seq.playing && !seq.nine && lines.length > 0;
   const promptText = toast ?? dir.call ?? text;
   const promptKind = toast ? 'error' : dir.call ? (dir.callScores ? 'call' : 'note') : 'plain';
 
@@ -434,6 +470,19 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
     rememberRect(`card:${c}`, document.querySelector(`[data-card="${c}"] .card`));
     act({ t: 'play', card: c });
   };
+
+  // ---- presence: the card you are over (or, discarding, the one you last picked) ----
+  const [hot, setHot] = useState<Card | null>(null);
+  const hotFrom = (target: EventTarget) => {
+    const el = (target as Element).closest?.('[data-card]');
+    setHot(el ? Number(el.getAttribute('data-card')) : null);
+  };
+  const choosing = !offline && stage !== 'show' && stage !== 'over'
+    && (view.phase === 'peg' || (view.phase === 'discard' && !iDiscarded && !sentNow));
+  const thinking = hot !== null && handCards.includes(hot) ? hot : view.phase === 'discard' ? sel[sel.length - 1] ?? null : null;
+  const considered = choosing ? thinking : null;
+  useEffect(() => consider?.(considered), [consider, considered]);
+  useEffect(() => () => consider?.(null), [consider]);
 
   const cribShown = Math.max(0, view.cribCount - (sentNow && iDiscarded ? sentNow.cards.length : 0) - flying);
   const pegShown = pegDisplay(view, dir.frozen);
@@ -471,6 +520,7 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
               active={busySeat(s)}
               compact={compact}
               emoji={emojis?.[s]}
+              considering={considering?.[s] ?? undefined}
             />
           );
         })}
@@ -523,7 +573,6 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
               total={result.total}
               totalPhrase={countAloud(result.items).totalPhrase}
               onTap={seq.next}
-              onRecount={seq.restart}
             />
           )}
           {stage === 'over' && copy && (
@@ -549,6 +598,7 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
         ) : (
           <>
             <p aria-live="polite" data-kind={promptKind} className={dir.call ? `tone-${dir.callTone ?? 0}` : undefined}>{promptText}</p>
+            {recount && <CountAgain onPress={seq.restart} />}
             {button && (
               <button type="button" className={`btn${button.quiet ? ' btn--quiet' : ''}`} onClick={button.onPress} disabled={button.disabled}>{button.label}</button>
             )}
@@ -556,7 +606,14 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
         )}
       </div>
 
-      <div className="table__hand" data-offline={offline || undefined}>
+      <div
+        className="table__hand"
+        data-offline={offline || undefined}
+        onPointerOver={(e) => hotFrom(e.target)}
+        onPointerDown={(e) => hotFrom(e.target)}
+        onPointerLeave={() => setHot(null)}
+        onPointerCancel={() => setHot(null)}
+      >
         {stage === 'over' && next && (
           <button type="button" className="btn btn--wide btn--quiet" onClick={rematch.go} disabled={rematch.busy}>
             {msg.next ? 'Join rematch' : rematch.busy ? 'Shuffling…' : 'Rematch'}

@@ -73,11 +73,10 @@
 .card__photo img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: 50% 35%; pointer-events: none; }
 /* Treatments are baked (scripts/bake-deck.mjs) or rendered in the browser with the same
    code (photoTreatment.ts), so a treated image arrives already treated and CSS adds only
-   the vignette. While an unbaked photo is waiting for its render, this approximates
-   'tinted'; there is no CSS path for tritone (handoff v2 styles.css). */
-.card__photo[data-unbaked] img { filter: saturate(0.55) contrast(1.05); }
-.card__photo[data-unbaked]::before { content: ''; position: absolute; inset: 0; z-index: 1; background: var(--ink); opacity: 0.18; mix-blend-mode: soft-light; }
-.card__mini-slot[data-unbaked] { filter: saturate(0.55) contrast(1.05); }
+   the vignette. While an unbaked photo is waiting for its render, these approximate
+   'tinted' (nearly all its colour) and 'mono'. */
+.card__photo[data-unbaked='tinted'] img, .card__mini-slot[data-unbaked='tinted'] { filter: saturate(0.85); }
+.card__photo[data-unbaked='mono'] img, .card__mini-slot[data-unbaked='mono'] { filter: grayscale(1) contrast(1.05); }
 /* Soft vignette at the frame, every treatment. */
 .card__photo::after {
   content: ''; position: absolute; inset: 0; z-index: 2;

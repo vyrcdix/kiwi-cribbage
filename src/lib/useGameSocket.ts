@@ -2,7 +2,8 @@
 // resends the full state after every (re)connect, so this hook keeps no game
 // state of its own — it only hands messages to the caller.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Action, ClientMsg, ServerMsg } from '../../shared/game';
+import type { Card } from '../../shared/cards';
+import type { Action, ClientMsg, Seat, ServerMsg } from '../../shared/game';
 
 export type StateMsg = Extract<ServerMsg, { t: 'state' }>;
 export type ConnStatus = 'connecting' | 'open' | 'reconnecting' | 'failed';
@@ -11,7 +12,12 @@ interface Handlers {
   /** `fresh` is true for the first state after each (re)connect: its events must not be replayed. */
   onState: (msg: StateMsg, fresh: boolean) => void;
   onError: (message: string) => void;
+  /** Presence: another player is considering the face-down card at `slot` (null = none). */
+  onPresence?: (seat: Seat, slot: number | null) => void;
 }
+
+/** Presence is sent at most this often (about 4 a second); the latest value always gets through. */
+const CONSIDER_EVERY_MS = 250;
 
 interface Options extends Handlers {
   code: string;
@@ -22,13 +28,35 @@ interface Options extends Handlers {
 /** After this long in the background a phone's socket may be silently dead; reconnect on return. */
 const STALE_AFTER_HIDDEN_MS = 20_000;
 
-export function useGameSocket({ code, token, enabled, onState, onError }: Options) {
+export function useGameSocket({ code, token, enabled, onState, onError, onPresence }: Options) {
   const [status, setStatus] = useState<ConnStatus>('connecting');
   const [fatal, setFatal] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
-  const handlers = useRef<Handlers>({ onState, onError });
-  handlers.current = { onState, onError };
+  const handlers = useRef<Handlers>({ onState, onError, onPresence });
+  handlers.current = { onState, onError, onPresence };
+
+  // Presence: what we want the table to see, what this socket has been told, and when.
+  const want = useRef<Card | null>(null);
+  const told = useRef<{ ws: WebSocket | null; card: Card | null; at: number }>({ ws: null, card: null, at: 0 });
+  const considerTimer = useRef<ReturnType<typeof setTimeout>>();
+  const flushConsider = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // A new socket starts from "none" on the server.
+    if (told.current.ws !== ws) told.current = { ws, card: null, at: 0 };
+    if (told.current.card === want.current) return;
+    const wait = told.current.at + CONSIDER_EVERY_MS - Date.now();
+    if (wait > 0) {
+      clearTimeout(considerTimer.current);
+      considerTimer.current = setTimeout(flushConsider, wait);
+      return;
+    }
+    told.current = { ws, card: want.current, at: Date.now() };
+    const msg: ClientMsg = { t: 'consider', card: want.current };
+    ws.send(JSON.stringify(msg));
+  }, []);
+  useEffect(() => () => clearTimeout(considerTimer.current), []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -67,6 +95,10 @@ export function useGameSocket({ code, token, enabled, onState, onError }: Option
           attempt = 0;
           setStatus('open');
           handlers.current.onState(msg, fresh);
+          // After a reconnect, say again what we are considering.
+          if (fresh) flushConsider();
+        } else if (msg.t === 'presence') {
+          handlers.current.onPresence?.(msg.seat, msg.slot);
         } else if (msg.t === 'error') {
           if (!gotState) setFatal(msg.message);
           else handlers.current.onError(msg.message);
@@ -138,7 +170,13 @@ export function useGameSocket({ code, token, enabled, onState, onError }: Option
     return true;
   }, []);
 
+  /** Presence: say which card of yours you are considering (null = none). Throttled; never an error. */
+  const consider = useCallback((card: Card | null) => {
+    want.current = card;
+    flushConsider();
+  }, [flushConsider]);
+
   const retry = useCallback(() => setGeneration((g) => g + 1), []);
 
-  return { status, fatal, send, retry };
+  return { status, fatal, send, consider, retry };
 }

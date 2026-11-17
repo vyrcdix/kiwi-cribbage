@@ -40,7 +40,7 @@ export interface CountStep {
 export interface CountAloud {
   steps: CountStep[];
   total: number;
-  /** The last beat: "Fourteen.", or for nothing "Nineteen — nothing this time". */
+  /** The last beat: "Fourteen.", or for nothing "Nineteen. Nothing this time.". */
   totalPhrase: string;
 }
 
@@ -98,5 +98,5 @@ export function countAloud(items: ScoreItem[]): CountAloud {
     return { kind: it.kind, phrase: k === 0 ? capitalise(said) : said, reason: reasonFor(it), running, points: it.points, cards: it.cards };
   });
   const total = running;
-  return { steps, total, totalPhrase: total === 0 ? 'Nineteen — nothing this time' : `${capitalise(numberWord(total))}.` };
+  return { steps, total, totalPhrase: total === 0 ? 'Nineteen. Nothing this time.' : `${capitalise(numberWord(total))}.` };
 }

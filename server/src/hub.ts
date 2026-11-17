@@ -1,6 +1,7 @@
 // WebSocket rooms: one room per game code, any number of sockets per seat.
 // Every message from a client is untrusted; nothing in here may throw out of a
 // socket event handler.
+import { createHmac, randomBytes } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
@@ -33,7 +34,16 @@ interface Conn {
   /** The session (device) that said hello; signing it out or revoking it hangs this socket up. */
   sessionId: string | null;
   helloTimer: NodeJS.Timeout | null;
+  /** Presence: the slot this socket last had relayed (null = none). */
+  slot: number | null;
+  /** Presence rate limit: a token bucket. */
+  considerTokens: number;
+  considerAt: number;
 }
+
+/** Presence messages a socket may send: a burst of 8, refilled at 8 a second (clients send about 4). */
+const CONSIDER_BURST = 8;
+const CONSIDER_PER_SEC = 8;
 
 const MAX_PAYLOAD = 64 * 1024;
 
@@ -73,6 +83,8 @@ export class Hub {
   private readonly rooms = new Map<string, Set<Conn>>();
   private readonly pingTimer: NodeJS.Timeout;
   private readonly helloTimeoutMs: number;
+  /** Scrambles the order of held cards for presence; never leaves the process. */
+  private readonly presenceKey = randomBytes(32);
   private closing = false;
 
   constructor(
@@ -192,7 +204,10 @@ export class Hub {
   // ---- internals ----
 
   private onConnection(ws: WebSocket): void {
-    const conn: Conn = { ws, alive: true, code: null, playerId: null, sessionId: null, helloTimer: null };
+    const conn: Conn = {
+      ws, alive: true, code: null, playerId: null, sessionId: null, helloTimer: null,
+      slot: null, considerTokens: CONSIDER_BURST, considerAt: Date.now(),
+    };
     this.conns.add(conn);
     conn.helloTimer = setTimeout(() => {
       if (conn.code === null) this.reject(conn, 'Expected hello');
@@ -241,6 +256,8 @@ export class Hub {
     switch (m.t) {
       case 'act':
         return this.onAct(conn, m.action);
+      case 'consider':
+        return this.onConsider(conn, m.card);
       case 'hello':
         return this.sendError(conn, 'Already connected to a game');
       default:
@@ -299,10 +316,61 @@ export class Hub {
     this.broadcast(game.code, result.events);
   }
 
+  /**
+   * Presence: relay which face-down card this player is considering to everyone
+   * else at the table. Nothing is stored and the game is not touched. Hands are
+   * held sorted, so the card's position would hint at its rank; the slot sent is
+   * its position in a keyed scramble of the hand instead, which stays stable as
+   * cards leave and changes every deal. Anything stale (a card just played, the
+   * wrong phase) quietly means "none": those are ordinary races, not errors.
+   */
+  private onConsider(conn: Conn, rawCard: unknown): void {
+    if (rawCard !== null && !isCard(rawCard)) return this.sendError(conn, 'Malformed message');
+    const now = Date.now();
+    conn.considerTokens = Math.min(CONSIDER_BURST, conn.considerTokens + ((now - conn.considerAt) / 1000) * CONSIDER_PER_SEC);
+    conn.considerAt = now;
+    if (conn.considerTokens < 1) return;
+    conn.considerTokens -= 1;
+    const why = this.store.sessionProblem(conn.sessionId!);
+    if (why) return this.reject(conn, why);
+
+    const game = this.store.game(conn.code!);
+    if (!game) return;
+    const seat = this.store.seatOf(game.code, conn.playerId!);
+    if (seat === null) return;
+    let slot: number | null = null;
+    const state = game.status === 'active' && !game.voided_at ? parseState(game) : null;
+    if (rawCard !== null && state && (state.phase === 'discard' || state.phase === 'peg')) {
+      const hand = state.hands[seat] ?? [];
+      const choosing = state.phase === 'peg' || viewFor(state, seat).discarded[seat] === false;
+      if (choosing && hand.includes(rawCard)) {
+        const tag = (c: number) =>
+          createHmac('sha256', this.presenceKey).update(`${game.code}:${state.handNo}:${seat}:${c}`).digest('hex');
+        const mine = tag(rawCard);
+        slot = hand.filter((c) => tag(c) < mine).length;
+      }
+    }
+    if (slot === conn.slot) return;
+    conn.slot = slot;
+    this.relayPresence(conn, seat, slot);
+  }
+
+  private relayPresence(from: Conn, seat: Seat, slot: number | null): void {
+    for (const other of this.rooms.get(from.code!) ?? []) {
+      if (other.playerId === null || other.playerId === from.playerId) continue;
+      this.send(other, { t: 'presence', seat, slot });
+    }
+  }
+
   private onClose(conn: Conn): void {
     if (conn.helloTimer) clearTimeout(conn.helloTimer);
     this.conns.delete(conn);
     if (conn.code === null) return;
+    // A socket that goes away mid-thought must not leave its card lifted.
+    if (conn.slot !== null && !this.closing) {
+      const seat = this.store.seatOf(conn.code, conn.playerId!);
+      if (seat !== null) this.relayPresence(conn, seat, null);
+    }
     const room = this.rooms.get(conn.code);
     room?.delete(conn);
     if (room && room.size === 0) this.rooms.delete(conn.code);

@@ -1,6 +1,6 @@
 // Development-only sheets, for the designer (design-handback-2 §5). Not routed in production.
-//   /dev/sheet  the twelve court photos of a deck as natural, tinted and tritone, at full-card
-//               size and at table (mini-slot) size, in the two-colour ink
+//   /dev/sheet  the twelve court photos of a deck as natural, tinted and mono, at full-card
+//               size and at table (mini-slot) size; tinted in the two-colour ink, mono in black
 //   /dev/cvd    the three-lane board, owner chips and strips, normally and under simulated
 //               protanopia, deuteranopia and tritanopia (Machado et al. 2009, severity 1,
 //               applied in linear RGB with SVG feColorMatrix)
@@ -8,14 +8,14 @@ import type { CSSProperties, ReactNode } from 'react';
 import { card } from '../../shared/cards';
 import type { PlayerView } from '../../shared/game';
 import { CardView } from '../cards/CardView';
-import { DECKS, type PhotoTreatment, bakedPhoto, suitInk } from '../cards/decks';
+import { DECKS, type PhotoTreatment, bakedPhoto, photoInk } from '../cards/decks';
 import { treat } from '../cards/photoTreatment';
 import { Board } from '../game/Board';
 import { PlayerStrip } from '../game/PlayerStrip';
 import { PeggingStage, ShowTracker } from '../game/stages';
 import './sheets.css';
 
-const TREATMENTS: PhotoTreatment[] = ['natural', 'tinted', 'tritone'];
+const TREATMENTS: PhotoTreatment[] = ['natural', 'tinted', 'mono'];
 const COURTS = [10, 11, 12].flatMap((r) => [0, 1, 2, 3].map((s) => card(r, s)));
 const CODE = (c: number) => ['J', 'Q', 'K'][(c % 13) - 10] + 'SHDC'[Math.floor(c / 13)];
 
@@ -27,11 +27,11 @@ export function TreatmentSheet() {
   return (
     <div className="devsheet" style={{ '--sheet-w': `${w}px` } as CSSProperties}>
       <header className="devsheet__head">
-        <h1>{deck.name} deck · court photos as natural, tinted and tritone</h1>
+        <h1>{deck.name} deck · court photos as natural, tinted and mono</h1>
         <p>
           Baked by <code>scripts/bake-deck.mjs</code> with <code>photo-treatment.js</code> (ported as <code>src/cards/photoTreatment.ts</code>):
-          tinted = saturation 65%, 22% toward the suit’s tritone; tritone = shadow ink → suit ink → stock.
-          Two-colour ink: hearts and diamonds in red {deck.inks.red}, spades and clubs in black {deck.inks.black}, on stock {deck.stock}.
+          tinted = saturation 85%, the suit’s ink pushed into the shadows (strength 0.5 × (1 − tone)); mono = black ink → stock for every suit.
+          Tinted is in the two-colour ink: hearts and diamonds in red {deck.inks.red}, spades and clubs in black {deck.inks.black}, on stock {deck.stock}.
           Full-card size is {w} px wide; table size is the 56 px compact face used for the hand at 390 wide (photo slot about 26 × 32 px).
           Frame and vignette are CSS, as on the table.
         </p>
@@ -50,8 +50,8 @@ export function TreatmentSheet() {
             </Row>
           ))}
           {TREATMENTS.map((t) => (
-            <Row key={`m${t}`} label={<>{t}<small>table size{t === 'tinted' ? ' · what the table shows' : ''}</small></>} mini>
-              {COURTS.map((c) => <td key={c}><CardView card={c} deck={deckId} width={56} treatment={t} miniTreatment={t} fourColour={false} /></td>)}
+            <Row key={`m${t}`} label={<>{t}<small>table size{t === deck.photoTreatment ? ' · what the table shows' : ''}</small></>} mini>
+              {COURTS.map((c) => <td key={c}><CardView card={c} deck={deckId} width={56} treatment={t} fourColour={false} /></td>)}
             </Row>
           ))}
         </tbody>
@@ -96,7 +96,7 @@ async function compareLive(deckId = 'lily', treatment: PhotoTreatment = 'tinted'
     const orig = deck.photos[code];
     if (!baked || !orig) continue;
     const a = pixels(await load(orig));
-    treat(a, { treatment, ink: suitInk(deck, Math.floor(c / 13), false), stock: deck.stock });
+    treat(a, { treatment, ink: photoInk(deck, treatment, Math.floor(c / 13), false), stock: deck.stock });
     const b = pixels(await load(baked));
     let sum = 0;
     let n = 0;

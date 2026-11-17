@@ -5,7 +5,7 @@
 import { createContext } from 'react';
 import { type Card, RANKS, rank, suit } from '../../shared/cards';
 import baked from './baked';
-import { DECKS, type DeckSpec } from './deckTokens';
+import { DECKS, type DeckSpec, suitInk } from './deckTokens';
 import type { PhotoTreatment } from './photoTreatment';
 
 export type { PhotoTreatment } from './photoTreatment';
@@ -44,8 +44,8 @@ const sameInks = (a: DeckSpec['inks'], b: DeckSpec['inks']) =>
 
 /**
  * The baked render of a court photo, if there is one:
- *   <dir>/<CODE>.<treatment>.jpg      in the two-colour ink
- *   <dir>/<CODE>.<treatment>.4c.jpg   in the four-colour ink, where that differs
+ *   <dir>/<CODE>.<treatment>.jpg      in the two-colour ink (mono: the black ink, every suit)
+ *   <dir>/<CODE>.tinted.4c.jpg        in the four-colour ink, where that differs
  * Null for 'natural', an unbaked deck or court, or renders baked with other tokens.
  */
 export function bakedPhoto(deck: DeckSpec, code: string, treatment: PhotoTreatment, fourColour: boolean): string | null {
@@ -53,7 +53,7 @@ export function bakedPhoto(deck: DeckSpec, code: string, treatment: PhotoTreatme
   const b = BAKED[deck.id];
   if (!b || !b.treatments.includes(treatment) || !b.codes.includes(code)) return null;
   if (b.stock !== deck.stock || !sameInks(b.inks, deck.inks)) return null;
-  const four = fourColour && b.four.includes(code);
+  const four = treatment === 'tinted' && fourColour && b.four.includes(code);
   return `${b.dir}/${code}.${treatment}${four ? '.4c' : ''}.jpg`;
 }
 
@@ -74,3 +74,7 @@ export const PIPS: [number, number][][] = [
   [[L, 0.2], [R, 0.2], [L, 0.4], [R, 0.4], [C, 0.5], [L, 0.6], [R, 0.6], [L, 0.8], [R, 0.8]],
   [[L, 0.2], [R, 0.2], [C, 0.3], [L, 0.4], [R, 0.4], [L, 0.6], [R, 0.6], [C, 0.7], [L, 0.8], [R, 0.8]],
 ];
+
+/** The ink a court photo is treated with: the deck's black for mono, else the card's suit ink. */
+export const photoInk = (deck: DeckSpec, treatment: PhotoTreatment, s: number, fourColour: boolean): string =>
+  treatment === 'mono' ? deck.inks.black : suitInk(deck, s, fourColour);

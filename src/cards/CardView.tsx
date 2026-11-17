@@ -7,16 +7,16 @@
 // back ink (with the kiwi roundel at 90 px and over) or the deck's back photo.
 //
 // Court photos (deck-photo-spec.md, design-handback-2 §1): the full face shows the
-// deck's treatment ('tinted', 'tritone' or 'natural'); the mini-slot under 90 px
-// always shows the tinted render, whatever the treatment. Treated photos come from
-// the baked renders when they exist (scripts/bake-deck.mjs); otherwise the photo is
+// deck's treatment ('natural', 'tinted' or 'mono'), and the mini-slot under 90 px shows
+// the same render (handoff v3: a natural deck is natural at 26 px). Treated photos come
+// from the baked renders when they exist (scripts/bake-deck.mjs); otherwise the photo is
 // treated in the browser with the same code, and until that is ready a CSS
-// approximation of tinted stands in.
+// approximation stands in.
 import { type CSSProperties, useContext, useState } from 'react';
 import { type Card, rank, suit } from '../../shared/cards';
 import { Mark } from '../brand/Mark';
 import { cardSpoken } from '../lib/format';
-import { DeckContext, type DeckSpec, PIPS, type PhotoTreatment, bakedPhoto, cardCode, getDeck, suitInk } from './decks';
+import { DeckContext, type DeckSpec, PIPS, type PhotoTreatment, bakedPhoto, cardCode, getDeck, photoInk, suitInk } from './decks';
 import { useFourColour } from './prefs';
 import { useTreatedPhoto } from './useTreatedPhoto';
 import { Pip } from './Suit';
@@ -46,10 +46,8 @@ export interface CardViewProps {
   style?: CSSProperties;
   /** Purely decorative (a ghost in flight, a stack): hide from assistive tech. */
   decorative?: boolean;
-  /** Preview a photo treatment on the full face instead of the deck's own (the /deck switcher). */
+  /** Preview a photo treatment instead of the deck's own (the /deck switcher, the dev sheet). */
   treatment?: PhotoTreatment;
-  /** Development sheets only: break the rule that the mini-slot always shows the tinted render. */
-  miniTreatment?: PhotoTreatment;
 }
 
 /** Where a court photo comes from for one treatment: baked file, live render, or the original with the CSS stand-in. */
@@ -79,7 +77,7 @@ function CourtPhoto({ src, original, treatment, unbaked, fallback }: {
   const cur = pick(src);
   if (!cur) return fallback();
   return (
-    <div className="card__photo" data-treatment={treatment} data-unbaked={unbaked || cur !== src || undefined}>
+    <div className="card__photo" data-treatment={treatment} data-unbaked={(unbaked || cur !== src) && treatment !== 'natural' ? treatment : undefined}>
       <img
         src={cur}
         alt=""
@@ -96,7 +94,7 @@ function CourtPhoto({ src, original, treatment, unbaked, fallback }: {
 
 export function CardView({
   card, width = 56, fluid = false, face, state = '', deck: deckId, fourColour, label, className, style, decorative,
-  treatment, miniTreatment = 'tinted',
+  treatment,
 }: CardViewProps) {
   const contextDeck = useContext(DeckContext);
   const [prefFour] = useFourColour();
@@ -121,10 +119,11 @@ export function CardView({
   const cls = (extra: string) => ['card', extra, className].filter(Boolean).join(' ');
   const code = faceDown ? '' : cardCode(card);
   const original = faceDown ? null : d.photos[code] ?? null;
-  const ink = faceDown ? d.back.ink : suitInk(d, s, four);
-  // Hooks run for every card; only the face that is drawn uses its result.
-  const full = usePhotoSource(d, code, compact ? null : original, treatment ?? d.photoTreatment, ink, four);
-  const mini = usePhotoSource(d, code, compact ? original : null, miniTreatment, ink, four);
+  const treated = treatment ?? d.photoTreatment;
+  const ink = photoInk(d, treated, s, four);
+  // One render for both faces: the mini-slot shows what the full face shows.
+  const full = usePhotoSource(d, code, original, treated, ink, four);
+  const mini = full;
 
   if (faceDown) {
     const photo = d.back.photo && !failedImages.has(d.back.photo) ? d.back.photo : null;
@@ -161,7 +160,7 @@ export function CardView({
           <div
             className="card__mini-slot"
             data-photo={miniSrc ? '' : undefined}
-            data-unbaked={miniSrc && (mini.unbaked || miniSrc !== mini.src) && miniTreatment !== 'natural' ? '' : undefined}
+            data-unbaked={miniSrc && (mini.unbaked || miniSrc !== mini.src) && treated !== 'natural' ? treated : undefined}
             style={miniSrc ? { backgroundImage: `url(${miniSrc})` } : undefined}
           />
         ) : (
