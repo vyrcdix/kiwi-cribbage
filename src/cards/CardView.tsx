@@ -5,12 +5,20 @@
 // indices and the full pip layout. Courts put the photo in a 4:5 slot with rank
 // and suit outside it on card stock. Backs are the oilcloth check in the deck's
 // back ink (with the kiwi roundel at 90 px and over) or the deck's back photo.
+//
+// Court photos (deck-photo-spec.md, design-handback-2 §1): the full face shows the
+// deck's treatment ('tinted', 'tritone' or 'natural'); the mini-slot under 90 px
+// always shows the tinted render, whatever the treatment. Treated photos come from
+// the baked renders when they exist (scripts/bake-deck.mjs); otherwise the photo is
+// treated in the browser with the same code, and until that is ready a CSS
+// approximation of tinted stands in.
 import { type CSSProperties, useContext, useState } from 'react';
 import { type Card, rank, suit } from '../../shared/cards';
 import { Mark } from '../brand/Mark';
 import { cardSpoken } from '../lib/format';
-import { DeckContext, type DeckSpec, PIPS, cardCode, getDeck, suitInk } from './decks';
+import { DeckContext, type DeckSpec, PIPS, type PhotoTreatment, bakedPhoto, cardCode, getDeck, suitInk } from './decks';
 import { useFourColour } from './prefs';
+import { useTreatedPhoto } from './useTreatedPhoto';
 import { Pip } from './Suit';
 import './cards.css';
 
@@ -38,24 +46,48 @@ export interface CardViewProps {
   style?: CSSProperties;
   /** Purely decorative (a ghost in flight, a stack): hide from assistive tech. */
   decorative?: boolean;
+  /** Preview a photo treatment on the full face instead of the deck's own (the /deck switcher). */
+  treatment?: PhotoTreatment;
+  /** Development sheets only: break the rule that the mini-slot always shows the tinted render. */
+  miniTreatment?: PhotoTreatment;
+}
+
+/** Where a court photo comes from for one treatment: baked file, live render, or the original with the CSS stand-in. */
+function usePhotoSource(deck: DeckSpec, code: string, original: string | null, treatment: PhotoTreatment, ink: string, four: boolean) {
+  const baked = original ? bakedPhoto(deck, code, treatment, four) : null;
+  const live = useTreatedPhoto(original && !baked && treatment !== 'natural' ? original : null, treatment, ink, deck.stock);
+  if (!original) return { src: null, unbaked: false };
+  if (treatment === 'natural') return { src: original, unbaked: false };
+  if (baked) return { src: baked, unbaked: false };
+  if (live) return { src: live, unbaked: false };
+  return { src: original, unbaked: true };
 }
 
 // Remember photos that failed so every card falls back at once rather than retrying.
 const failedImages = new Set<string>();
 
-function CourtPhoto({ src, deck, fallback }: { src: string; deck: DeckSpec; fallback: () => JSX.Element }) {
-  const [failed, setFailed] = useState(() => failedImages.has(src));
-  if (failed) return fallback();
+function CourtPhoto({ src, original, treatment, unbaked, fallback }: {
+  src: string;
+  /** The untreated photo, to fall back on if a baked render is missing. */
+  original: string;
+  treatment: PhotoTreatment;
+  unbaked: boolean;
+  fallback: () => JSX.Element;
+}) {
+  const pick = (s: string) => (!failedImages.has(s) ? s : !failedImages.has(original) ? original : null);
+  const [, bump] = useState(0);
+  const cur = pick(src);
+  if (!cur) return fallback();
   return (
-    <div className="card__photo" data-treatment={deck.photoTreatment}>
+    <div className="card__photo" data-treatment={treatment} data-unbaked={unbaked || cur !== src || undefined}>
       <img
-        src={src}
+        src={cur}
         alt=""
         draggable={false}
         decoding="async"
         onError={() => {
-          failedImages.add(src);
-          setFailed(true);
+          failedImages.add(cur);
+          bump((n) => n + 1);
         }}
       />
     </div>
@@ -64,6 +96,7 @@ function CourtPhoto({ src, deck, fallback }: { src: string; deck: DeckSpec; fall
 
 export function CardView({
   card, width = 56, fluid = false, face, state = '', deck: deckId, fourColour, label, className, style, decorative,
+  treatment, miniTreatment = 'tinted',
 }: CardViewProps) {
   const contextDeck = useContext(DeckContext);
   const [prefFour] = useFourColour();
@@ -86,6 +119,12 @@ export function CardView({
     ? { 'aria-hidden': true as const }
     : { role: 'img', 'aria-label': label ?? (faceDown ? 'Card, face down' : cardSpoken(card)) };
   const cls = (extra: string) => ['card', extra, className].filter(Boolean).join(' ');
+  const code = faceDown ? '' : cardCode(card);
+  const original = faceDown ? null : d.photos[code] ?? null;
+  const ink = faceDown ? d.back.ink : suitInk(d, s, four);
+  // Hooks run for every card; only the face that is drawn uses its result.
+  const full = usePhotoSource(d, code, compact ? null : original, treatment ?? d.photoTreatment, ink, four);
+  const mini = usePhotoSource(d, code, compact ? original : null, miniTreatment, ink, four);
 
   if (faceDown) {
     const photo = d.back.photo && !failedImages.has(d.back.photo) ? d.back.photo : null;
@@ -103,10 +142,9 @@ export function CardView({
     );
   }
 
-  const code = cardCode(card);
   const rankLabel = code.slice(0, -1);
   const court = r >= 10;
-  const photo = d.photos[code] ?? null;
+  const photo = full.src;
   const index = (foot?: boolean) => (
     <div className={foot ? 'card__index card__index--foot' : 'card__index'} aria-hidden={foot || undefined}>
       <span className="card__rank">{rankLabel}</span>
@@ -115,15 +153,16 @@ export function CardView({
   );
 
   if (compact) {
-    const photoOk = photo && !failedImages.has(photo);
+    const miniSrc = mini.src && !failedImages.has(mini.src) ? mini.src : original && !failedImages.has(original) ? original : null;
     return (
       <div className={cls('card--compact')} data-state={state} style={vars} {...a11y}>
         {index()}
         {court ? (
           <div
             className="card__mini-slot"
-            data-photo={photoOk ? '' : undefined}
-            style={photoOk ? { backgroundImage: `url(${photo})` } : undefined}
+            data-photo={miniSrc ? '' : undefined}
+            data-unbaked={miniSrc && (mini.unbaked || miniSrc !== mini.src) && miniTreatment !== 'natural' ? '' : undefined}
+            style={miniSrc ? { backgroundImage: `url(${miniSrc})` } : undefined}
           />
         ) : (
           <Pip s={s} className="card__big-pip" />
@@ -146,7 +185,7 @@ export function CardView({
       {!court &&
         (photo && r === 0 ? (
           <div className="card__slot" data-frame={d.frame}>
-            <CourtPhoto src={photo} deck={d} fallback={houseCourt} />
+            <CourtPhoto src={photo} original={original!} treatment={treatment ?? d.photoTreatment} unbaked={full.unbaked} fallback={houseCourt} />
           </div>
         ) : (
           PIPS[r].map(([x, y], i) => (
@@ -160,7 +199,7 @@ export function CardView({
         ))}
       {court && (
         <div className="card__slot" data-frame={d.frame}>
-          {photo ? <CourtPhoto src={photo} deck={d} fallback={houseCourt} /> : houseCourt()}
+          {photo ? <CourtPhoto src={photo} original={original!} treatment={treatment ?? d.photoTreatment} unbaked={full.unbaked} fallback={houseCourt} /> : houseCourt()}
         </div>
       )}
     </div>

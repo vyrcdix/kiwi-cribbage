@@ -47,16 +47,20 @@
   --c-pale: #DCE8C8;         /* mark only */
   --c-skin: #7B5B3A;         /* mark only */
   --c-tomato: #BE3228;       /* rim line, skunk lines, your peg, red suits */
-  --c-blue: #2B5278;         /* opponent's peg */
+  --c-blue: #2B5278;         /* opponent's peg; the other team */
+  --c-mustard: #C8900F;      /* third player in cut-throat only; always a diamond with an ink outline */
+  --c-mustard-deep: #8F6608; /* mustard back-peg ring, and mustard as text (5:1 on enamel) */
   --c-butter: #E9B93B;       /* scoring highlight outline */
   --c-butter-soft: #F6E3A6;  /* scoring highlight fill */
   --check: rgba(47, 107, 69, 0.06);
 
-  /* Team colours (build addition for 3 and 4 players, see design-handback-1 §2).
-     0 is always your team, 1 and 2 the others clockwise from your left. */
+  /* Team colours (design-handback-2 §2). 0 is always your team (tomato), 1 the next
+     team clockwise from your left (blue), 2 the third player in cut-throat (mustard,
+     drawn as a diamond wherever the others are discs). Green is never a team colour:
+     it is the action colour. */
   --c-team-0: var(--c-tomato);
   --c-team-1: var(--c-blue);
-  --c-team-2: var(--c-green);
+  --c-team-2: var(--c-mustard);
 
   /* type */
   --font-ui: 'Familjen Grotesk', system-ui, sans-serif;
@@ -106,6 +110,7 @@
   --ease-seat: cubic-bezier(0.3, 1.4, 0.5, 1);
 }
 
-.tone-0 { --tone: var(--c-team-0); }
-.tone-1 { --tone: var(--c-team-1); }
-.tone-2 { --tone: var(--c-team-2); }
+.tone-0 { --tone: var(--c-team-0); --tone-ink: var(--c-team-0); }
+.tone-1 { --tone: var(--c-team-1); --tone-ink: var(--c-team-1); }
+/* Mustard is too light for text or a hairline on enamel; those use the deep mustard. */
+.tone-2 { --tone: var(--c-team-2); --tone-ink: var(--c-mustard-deep); }

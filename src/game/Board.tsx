@@ -1,25 +1,28 @@
-// The board as SVG (handoff Board.jsx): four rows of 30, a lane per team, front and
+// The board as SVG (handoff v2 Board.jsx): four rows of 30, a lane per team, front and
 // back pegs, the skunk (91) and double-skunk (61) tabs at the heads of rows four and
-// three, and the finish hole. Pegs move in JS along the track (motion.md): the back
-// peg leapfrogs the front one, lifting, hopping or gliding, fading across a row change
-// and seating with a small overshoot.
+// three, and the finish hole. Two or three lanes in the same 358 x 156 drawing: with
+// three, the lanes sit 9 apart, holes are 3.6 and pegs 9 across. Lanes run top to
+// bottom clockwise from your left; yours is always the bottom one. Pegs move in JS
+// along the track (motion.md): the back peg leapfrogs the front one, lifting, hopping
+// or gliding, fading across a row change and seating with a small overshoot.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { onSkip, reducedMotion } from './motion';
 import {
   FINISH, HOLES_X2, PER_ROW, ROWS, START_X, VIEW_H, VIEW_W, X0,
   type PegFrame, holeXY, laneY, pegTimeline, rowCentre,
 } from './pegPath';
+import type { TeamColour } from './TeamMark';
 
-export interface BoardLane {
+export interface BoardTeam {
   team: number;
-  /** Colour slot from seating.toneOf (0 = your team). */
-  tone: number;
+  /** tomato is always your team; blue the other team; mustard the third player in cut-throat. */
+  colour: TeamColour;
   name: string;
 }
 
 interface Props {
-  /** Top to bottom: the others' lanes above, yours at the bottom. */
-  lanes: BoardLane[];
+  /** Top to bottom, clockwise from your left: the others' lanes above, yours at the bottom. */
+  teams: BoardTeam[];
   /** By team: where the pegs should be. Changing these animates the pegs. */
   scores: number[];
   back: number[];
@@ -31,8 +34,19 @@ interface Props {
 
 // One dot per hole, five to a group. A round-capped zero-length dash draws a dot.
 const HOLES = '0.01 9.59 0.01 9.59 0.01 9.59 0.01 9.59 0.01 12.59';
-const PEG = ['#BE3228', '#2B5278', '#2F6B45'];
-const LANE_TINT = ['#CC8F88', '#7F93A8', '#86A88F']; // quiet versions of the peg colours
+
+/** Team colours. `shape` is the second cue, so colour is never the only one. */
+export const TEAM: Record<TeamColour, { peg: string; ring: string; tint: string; outline: string; shape: 'round' | 'diamond' }> = {
+  tomato: { peg: '#BE3228', ring: '#BE3228', tint: '#CC8F88', outline: '#FCFAF4', shape: 'round' },
+  blue: { peg: '#2B5278', ring: '#2B5278', tint: '#7F93A8', outline: '#FCFAF4', shape: 'round' },
+  mustard: { peg: '#C8900F', ring: '#8F6608', tint: '#BFA256', outline: '#1F2723', shape: 'diamond' },
+};
+
+/** Hole, peg and ring sizes for two and three lanes. */
+const LAYOUT = {
+  2: { hole: 4.4, peg: 5.6, back: 4.2, ring: 2.4 },
+  3: { hole: 3.6, peg: 4.5, back: 3.3, ring: 2 },
+} as const;
 
 interface PegPair {
   pos: [number, number];
@@ -46,9 +60,10 @@ interface Running {
 
 const frameAttr = (f: PegFrame) => `translate(${f.x.toFixed(2)} ${f.y.toFixed(2)}) scale(${f.s.toFixed(3)})`;
 
-export function Board({ lanes, scores, back, onSeated, finishLit }: Props) {
+export function Board({ teams: lanes, scores, back, onSeated, finishLit }: Props) {
   const nLanes = lanes.length;
   const small = nLanes > 2;
+  const L = LAYOUT[small ? 3 : 2];
   const laneOf = (team: number) => lanes.findIndex((l) => l.team === team);
   const pairs = useRef<Record<number, PegPair>>({});
   const pegEls = useRef<Record<string, SVGGElement | null>>({});
@@ -186,7 +201,6 @@ export function Board({ lanes, scores, back, onSeated, finishLit }: Props) {
   }, []);
 
   const label = `Board. ${lanes.map((l) => `${l.name} ${scores[l.team]}`).join(', ')}. Double skunk line at 61, skunk line at 91.`;
-  const r = small ? { front: 4.4, back: 3.4, ring: 2, hi: 1.2, hiAt: -1.3 } : { front: 5.6, back: 4.2, ring: 2.4, hi: 1.5, hiAt: -1.7 };
 
   return (
     <svg className="board" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} role="img" aria-label={label} data-lanes={nLanes}>
@@ -211,8 +225,8 @@ export function Board({ lanes, scores, back, onSeated, finishLit }: Props) {
                 x2={HOLES_X2}
                 y1={laneY(row, lane, nLanes)}
                 y2={laneY(row, lane, nLanes)}
-                stroke={LANE_TINT[l.tone] ?? LANE_TINT[1]}
-                strokeWidth={small ? 3.8 : 4.4}
+                stroke={TEAM[l.colour].tint}
+                strokeWidth={L.hole}
                 strokeLinecap="round"
                 strokeDasharray={HOLES}
               />
@@ -222,7 +236,7 @@ export function Board({ lanes, scores, back, onSeated, finishLit }: Props) {
       })}
 
       {lanes.map((l, lane) => (
-        <circle key={l.team} cx={START_X} cy={laneY(0, lane, nLanes)} r="1.8" fill={LANE_TINT[l.tone] ?? LANE_TINT[1]} />
+        <circle key={l.team} cx={START_X} cy={laneY(0, lane, nLanes)} r={L.hole * 0.42} fill={TEAM[l.colour].tint} />
       ))}
 
       <g className={`board__finish${finishLit ? ' is-lit' : ''}`}>
@@ -242,8 +256,12 @@ export function Board({ lanes, scores, back, onSeated, finishLit }: Props) {
             .filter((i) => (i === pair.front) === drawFront)
             .map((i) => {
               const { x, y } = holeXY(pair.pos[i], lane, nLanes);
-              const colour = PEG[l.tone] ?? PEG[1];
+              const t = TEAM[l.colour];
               const isFront = i === pair.front;
+              const r = isFront ? L.peg : L.back;
+              const fill = isFront ? t.peg : '#FCFAF4';
+              const stroke = isFront ? t.outline : t.ring;
+              const sw = isFront ? (t.shape === 'diamond' ? 1.1 : 1.4) : L.ring;
               return (
                 <g
                   key={`${l.team}-${i}`}
@@ -251,17 +269,16 @@ export function Board({ lanes, scores, back, onSeated, finishLit }: Props) {
                     pegEls.current[`${l.team}-${i}`] = el;
                   }}
                   className={isFront ? 'peg peg--front' : 'peg peg--back'}
+                  data-shape={t.shape}
                   transform={`translate(${x} ${y}) scale(1)`}
                 >
-                  <circle className="peg__shadow" cx="0.8" cy="1.6" r={r.front} fill="#1F2723" opacity="0" />
-                  {isFront ? (
-                    <>
-                      <circle r={r.front} fill={colour} stroke="#FCFAF4" strokeWidth="1.5" />
-                      <circle cx={r.hiAt} cy={r.hiAt} r={r.hi} fill="#FCFAF4" opacity="0.6" />
-                    </>
+                  <circle className="peg__shadow" cx="0.8" cy="1.6" r={L.peg} fill="#1F2723" opacity="0" />
+                  {t.shape === 'diamond' ? (
+                    <rect x={-r * 0.88} y={-r * 0.88} width={r * 1.76} height={r * 1.76} transform="rotate(45)" fill={fill} stroke={stroke} strokeWidth={sw} />
                   ) : (
-                    <circle r={r.back} fill="#FCFAF4" stroke={colour} strokeWidth={r.ring} />
+                    <circle r={r} fill={fill} stroke={stroke} strokeWidth={sw} />
                   )}
+                  {isFront && t.shape === 'round' && <circle cx={-r * 0.3} cy={-r * 0.3} r={r * 0.27} fill="#FCFAF4" opacity="0.6" />}
                 </g>
               );
             });

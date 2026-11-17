@@ -1,0 +1,21 @@
+/* Development sheets only (/dev/sheet, /dev/cvd). */
+.devsheet { padding: 24px; background: var(--c-cloth); min-height: 100vh; color: var(--c-ink); }
+.devsheet__head { max-width: 1100px; margin-bottom: 16px; }
+.devsheet__head h1 { font-size: 24px; letter-spacing: -0.02em; margin-bottom: 6px; }
+.devsheet__head p { font-size: 14px; color: var(--c-ink-soft); line-height: 1.4; }
+.devsheet__head code { font-size: 13px; }
+.devsheet__grid { border-collapse: separate; border-spacing: 6px 8px; }
+.devsheet__grid th { font: 700 14px var(--font-num); text-align: center; }
+.devsheet__grid tbody th { text-align: right; padding-right: 8px; font: 700 15px var(--font-ui); text-transform: capitalize; white-space: nowrap; }
+.devsheet__grid tbody th small { display: block; font-weight: 500; font-size: 12px; color: var(--c-ink-soft); text-transform: none; }
+.devsheet__grid td { text-align: center; vertical-align: middle; }
+.devsheet__grid td .card { margin: 0 auto; }
+.devsheet__grid tr.is-mini:first-of-type td, .devsheet__grid tr.is-mini th { padding-top: 6px; }
+.devsheet__cvd { display: grid; grid-template-columns: repeat(2, 440px); gap: 18px; }
+.devsheet__panel { background: var(--c-enamel); border: 1.5px solid var(--c-ink); border-radius: 14px; padding: 12px 14px 16px; }
+.devsheet__panel h2 { font-size: 17px; margin-bottom: 8px; }
+.devsheet__sim { display: flex; flex-direction: column; gap: 10px; background: var(--c-cloth); padding: 10px; border-radius: 10px; }
+.devsheet__strips { width: 100%; }
+.devsheet__peg { --played-w: 52px; --last-w: 34px; display: flex; flex-direction: column; align-items: center; }
+.devsheet__peg .count, .devsheet__peg .lastcount { display: none; }
+.devsheet__peg .played { width: 400px; min-height: 0; }

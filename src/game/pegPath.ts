@@ -3,8 +3,9 @@
 //
 // A straight track in four rows of 30, drawn in a 358 x 156 viewBox. Every row runs
 // left to right; row three starts at 61 (the double-skunk line) and row four at 91
-// (the skunk line). One lane per team inside each row: two lanes as designed, three
-// for a three-player game (the lanes sit closer and the pegs are a little smaller).
+// (the skunk line). One lane per team inside each row: two lanes 12 apart, or three
+// lanes 9 apart for a three-player game, with smaller holes and pegs (handoff v2
+// Board.jsx). The drawing is the same height either way.
 import { DUR, EASE } from './motion';
 
 export const ROWS = 4;
@@ -21,7 +22,7 @@ export const HOLES_X2 = 333;
 export const FINISH = { x: 344, y: ROW_CENTRE + 3 * ROW_STEP };
 export const GAME = 121;
 
-export const laneGap = (lanes: number): number => (lanes >= 3 ? 9.6 : 12);
+export const laneGap = (lanes: number): number => (lanes >= 3 ? 9 : 12);
 export const rowCentre = (row: number): number => ROW_CENTRE + row * ROW_STEP;
 export const laneY = (row: number, lane: number, lanes: number): number =>
   rowCentre(row) + (lane - (lanes - 1) / 2) * laneGap(lanes);

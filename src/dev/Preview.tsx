@@ -8,9 +8,12 @@ import type { GameEvent, PlayerCount, PlayerView, Play } from '../../shared/game
 import { scoreHand } from '../../shared/scoring';
 import type { Beat } from '../game/director';
 import { Table } from '../game/Table';
-import type { StateMsg } from '../lib/useGameSocket';
+import type { ConnStatus, StateMsg } from '../lib/useGameSocket';
+import { CvdSheet, TreatmentSheet } from './Sheets';
 
 const NAMES = ['Margaret', 'Bob', 'Carol', 'Dave'];
+// ?names=Margaret,Christabel-Anne,… to try longer names in the strips.
+const namesFrom = (q: URLSearchParams, n: number) => (q.get('names')?.split(',') ?? NAMES).concat(NAMES).slice(0, n);
 
 function base(n: PlayerCount): PlayerView {
   const teams = n === 4 ? 2 : n;
@@ -49,9 +52,20 @@ function fixture(n: PlayerCount, s: string): { view: PlayerView; prev?: PlayerVi
       };
     }
     case 'show':
-    case 'show29': {
-      const cards = s === 'show29' ? [card(4, 0), card(4, 1), card(4, 3), card(10, 2)] : [card(3, 0), card(4, 1), card(5, 2), card(10, 3)];
-      const starter = s === 'show29' ? card(4, 2) : card(4, 0);
+    case 'show29':
+    case 'show7':
+    case 'showroyal':
+    case 'show0': {
+      // show7: two fifteens and a run (3 4 5 K, starter 8); showroyal: a pair royal (9 9 9 2, starter Q);
+      // show0: nothing (2 4 6 8, starter Q).
+      const HANDS: Record<string, [number[], number]> = {
+        show: [[card(3, 0), card(4, 1), card(5, 2), card(10, 3)], card(4, 0)],
+        show29: [[card(4, 0), card(4, 1), card(4, 3), card(10, 2)], card(4, 2)],
+        show7: [[card(2, 0), card(3, 1), card(4, 2), card(12, 3)], card(7, 0)],
+        showroyal: [[card(8, 0), card(8, 1), card(8, 2), card(1, 3)], card(11, 0)],
+        show0: [[card(1, 0), card(3, 1), card(5, 2), card(7, 3)], card(11, 0)],
+      };
+      const [cards, starter] = HANDS[s];
       const { items, total } = scoreHand(cards, starter);
       const scores = [...v.scores];
       const back = [...v.back];
@@ -75,11 +89,19 @@ function fixture(n: PlayerCount, s: string): { view: PlayerView; prev?: PlayerVi
   }
 }
 
+/** /dev/table, /dev/sheet or /dev/cvd. */
 export function Preview() {
+  if (location.pathname.startsWith('/dev/sheet')) return <TreatmentSheet />;
+  if (location.pathname.startsWith('/dev/cvd')) return <CvdSheet />;
+  return <TablePreview />;
+}
+
+function TablePreview() {
   const q = new URLSearchParams(location.search);
   const n = Number(q.get('p') ?? 2) as PlayerCount;
   const s = q.get('s') ?? 'peg';
   const f = fixture(n, s);
+  const names = namesFrom(q, n);
   const [view, setView] = useState<PlayerView>(f.prev ?? f.view);
   const [beat, setBeat] = useState<Beat>({ id: 1, events: [], fresh: true });
   useEffect(() => {
@@ -92,14 +114,15 @@ export function Preview() {
   }, []);
   const msg: StateMsg = {
     t: 'state', code: 'DEMO1', status: s.startsWith('over') ? 'finished' : 'active',
-    players: NAMES.slice(0, n).map((name, i) => ({ id: String(i), name })), online: Array(n).fill(true),
+    players: names.map((name, i) => ({ id: String(i), name })), online: Array(n).fill(true),
     creator: '0', you: 0, view, events: [], next: null,
   };
   return (
     <Table
-      msg={msg} view={view} names={NAMES.slice(0, n)} status="open" pending={false}
+      msg={msg} view={view} names={names} status={(q.get('conn') as ConnStatus | null) ?? 'open'} pending={false}
       act={() => undefined} beat={beat} toast={null}
       rematch={{ busy: false, error: null, go: () => undefined }}
+      emojis={q.get('emoji') ? ['🐶', '🦊', '🐸', '🐼'].slice(0, n) : undefined}
     />
   );
 }

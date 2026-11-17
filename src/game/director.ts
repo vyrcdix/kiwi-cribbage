@@ -117,8 +117,18 @@ function buildScript(events: GameEvent[], view: PlayerView, prev: Memory, ctx: C
     }
   }
 
+  // "Go" stays a spoken call in the prompt (design-handback-2 §4), though the server
+  // says it for whoever cannot play.
+  const said = (g: Extract<GameEvent, { t: 'go' }>) => (g.seat === ctx.you ? '“Go,” you say.' : `“Go,” says ${ctx.names[g.seat]}.`);
+  const lastGo = gos[gos.length - 1];
   if (peg.length) {
-    const call = peg.map((e) => scoreCall(e, ctx.you, ctx.names)).join(' · ');
+    let call = peg.map((e) => scoreCall(e, ctx.you, ctx.names)).join(' · ');
+    const onlyGo = peg.length === 1 && peg[0].items.length === 1 && peg[0].items[0].kind === 'go';
+    if (lastGo && onlyGo) call = `${said(lastGo)} One to ${peg[0].seat === ctx.you ? 'you' : ctx.names[peg[0].seat]}.`;
+    else if (lastGo && peg.some((e) => e.items.some((it) => it.kind === 'go'))) {
+      // The point for the go was just said aloud; name it plainly after the other scores.
+      call = `${said(lastGo)} ${call.replace(/Go\. One to (.+?)\./g, 'one for the go to $1')}`;
+    }
     const callTone = tone(peg[peg.length - 1].seat);
     const scorerMine = teamOf(n, peg[peg.length - 1].seat) === mine;
     push({ stage: 'pegging', frozen: true, lit: litCards(peg.flatMap((e) => e.items)), call, callTone }, DUR.scoreHold, () => {
@@ -128,9 +138,8 @@ function buildScript(events: GameEvent[], view: PlayerView, prev: Memory, ctx: C
     push({ stage: 'pegging', frozen: true, call, callTone }, 'seat');
     // Let the call be read, then the ended count slides to the "last count" row.
     push({ stage: 'pegging', frozen: true, call, callTone }, 450);
-  } else if (gos.length && view.phase === 'peg') {
-    const g = gos[gos.length - 1];
-    push({ call: g.seat === ctx.you ? 'You say go.' : `${ctx.names[g.seat]} says go.`, callTone: tone(g.seat), callScores: false }, 1100);
+  } else if (lastGo && view.phase === 'peg') {
+    push({ call: said(lastGo), callTone: tone(lastGo.seat), callScores: false }, 1100);
   }
 
   if (newShow) {

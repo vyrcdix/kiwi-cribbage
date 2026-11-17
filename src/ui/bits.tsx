@@ -187,10 +187,12 @@ export function HandCards({ cards, starter, width = 40, lit }: { cards: Card[]; 
  * A confirmation for anything that can't be undone lightly. Rendered in place
  * as a modal sheet; Escape or the backdrop cancels.
  */
-export function Confirm({ title, children, confirm, danger, busy, onConfirm, onCancel }: {
+export function Confirm({ title, children, confirm, dismiss = 'Cancel', danger, busy, onConfirm, onCancel }: {
   title: string;
   children?: ReactNode;
   confirm: string;
+  /** The button that backs out (default "Cancel"). */
+  dismiss?: string;
   danger?: boolean;
   busy?: boolean;
   onConfirm: () => void;
@@ -215,7 +217,7 @@ export function Confirm({ title, children, confirm, danger, busy, onConfirm, onC
         <h2 id="sheet-title" className="sheet__title">{title}</h2>
         {children && <div className="sheet__body">{children}</div>}
         <div className="sheet__buttons">
-          <button type="button" className="btn btn--quiet" onClick={onCancel} data-autofocus>Cancel</button>
+          <button type="button" className="btn btn--quiet" onClick={onCancel} data-autofocus>{dismiss}</button>
           <button type="button" className={`btn${danger ? ' btn--danger' : ''}`} onClick={onConfirm} disabled={busy}>
             {busy ? 'One moment…' : confirm}
           </button>

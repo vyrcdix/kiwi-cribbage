@@ -4,6 +4,7 @@ import type { Card } from '../../shared/cards';
 import { type GameEvent, type PlayerCount, type Seat, type ShowResult, discardCount } from '../../shared/game';
 import { type ScoreItem, describeItem } from '../../shared/scoring';
 import { cardText, possessive } from '../lib/format';
+import { capitalise, countAloud } from './countAloud';
 import { listNames, teamName, toneOf, toneOfSeat } from './seating';
 
 export interface Line {
@@ -119,28 +120,77 @@ export interface ShowLine {
   /** Running total after this line. */
   running: number;
   cards: Card[];
+  kind: string;
+  points: number;
 }
 
-const SHOW_NAME: Record<string, (it: ScoreItem) => string> = {
-  fifteen: () => 'Fifteen',
-  pair: () => 'Pair',
-  run: (it) => `Run of ${num(it.points)}`,
-  flush: (it) => `Flush of ${num(it.points)}`,
-  nobs: () => 'His nobs',
+/**
+ * One line per combination, said the way players count aloud (countAloud.ts), in
+ * traditional order: "Fifteen two" / "7 + 8 = 15", "fifteen four", "and a pair is six".
+ */
+export function showLines(r: ShowResult): ShowLine[] {
+  return countAloud(r.items).steps.map((st) => ({
+    name: capitalise(st.phrase),
+    detail: st.reason,
+    running: st.running,
+    cards: st.cards,
+    kind: st.kind,
+    points: st.points,
+  }));
+}
+
+/** One row of the show's list: a single combination, or a finished group folded into one line. */
+export interface ShowRow {
+  key: number;
+  name: string;
+  detail: string;
+  /** Running total after the row. */
+  running: number;
+  /** How many combinations the row stands for (1 for an ordinary line). */
+  count: number;
+  /** The combination being counted now. */
+  current: boolean;
+}
+
+const GROUP_NAME: Record<string, (first: ShowLine) => string> = {
+  fifteen: () => 'Fifteens',
+  pair: () => 'Pairs',
+  run: (l) => `Runs of ${num(l.points)}`,
 };
 
-/** One line per combination, in the spoken order the engine already scores in. */
-export function showLines(r: ShowResult): ShowLine[] {
-  let running = 0;
-  return r.items.map((it) => {
-    running += it.points;
-    return {
-      name: (SHOW_NAME[it.kind] ?? describeItem)(it),
-      detail: it.cards.map(cardText).join(' '),
-      running,
-      cards: it.cards,
-    };
+/**
+ * The rows the show's list draws (design-handback-2 §4). The steps still play one
+ * at a time; once the list passes `max` lines, every finished group of the same
+ * kind folds into one line ("Fifteens, eight of them: 16"), and if that is still
+ * too many, so do the lines already counted in the group being counted now. A 29
+ * (fifteen lines) ends as three. `current` is the index being counted, or -1 when
+ * the list is drawn complete.
+ */
+export function showRows(lines: ShowLine[], current: number, max = 6): ShowRow[] {
+  const visible = current >= 0 ? lines.slice(0, current + 1) : lines;
+  const one = (l: ShowLine, i: number): ShowRow => ({ key: i, name: l.name, detail: l.detail, running: l.running, count: 1, current: i === current });
+  if (visible.length <= max) return visible.map(one);
+  // Runs of the same kind, as [first, last] indices.
+  const groups: [number, number][] = [];
+  visible.forEach((l, i) => {
+    const g = groups[groups.length - 1];
+    if (g && visible[g[1]].kind === l.kind) g[1] = i;
+    else groups.push([i, i]);
   });
+  const fold = (a: number, b: number): ShowRow => {
+    const part = visible.slice(a, b + 1);
+    const name = (GROUP_NAME[part[0].kind] ?? ((l: ShowLine) => `${l.name}s`))(part[0]);
+    const points = part.reduce((t, l) => t + l.points, 0);
+    return { key: a, name, detail: `${num(part.length)} of them: ${points}`, running: part[part.length - 1].running, count: part.length, current: false };
+  };
+  const build = (foldCurrent: boolean): ShowRow[] => groups.flatMap(([a, b]) => {
+    const live = current >= a && current <= b;
+    if (!live) return b > a ? [fold(a, b)] : [one(visible[a], a)];
+    if (foldCurrent && current - a >= 2) return [fold(a, current - 1), one(visible[current], current)];
+    return visible.slice(a, b + 1).map((l, k) => one(l, a + k));
+  });
+  const rows = build(false);
+  return rows.length <= max ? rows : build(true);
 }
 
 // ---- the hand log (laptop: the right-hand column) ----

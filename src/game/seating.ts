@@ -98,7 +98,8 @@ export function discardPrompt(players: PlayerCount, names: string[], you: Seat, 
   const need = discardCount(players) - selected;
   const crib = cribPhrase(players, names, you, dealer);
   if (need <= 0) return `Send to ${crib}`;
-  if (need === discardCount(players)) return need === 2 ? `Pick two cards for ${crib}` : `Pick one card for ${crib}`;
+  // Three and four players discard one: "Pick one for Dot's crib" (handoff v2 §2).
+  if (need === discardCount(players)) return need === 2 ? `Pick two cards for ${crib}` : `Pick one for ${crib}`;
   return 'Pick one more card';
 }
 
@@ -313,6 +314,40 @@ export function compactStatus(view: PlayerView, seat: Seat, online: boolean[], s
   const team = teamOf(view.players, seat);
   const d = (scores[team] ?? 0) - Math.max(...scores.filter((_, t) => t !== team));
   return d > 0 ? `Up ${d}` : d < 0 ? `Down ${-d}` : 'Level';
+}
+
+/**
+ * Line two of a compact strip during the show (handoff v2 §2): "Counting now",
+ * "Counts next", "Crib next"… for the player whose hand or crib it is.
+ */
+export function showStatusOf(view: PlayerView, seat: Seat): string {
+  const n = view.players;
+  // Three cells across a 360 screen leave line two about 55 px beside the score: say less.
+  const short = n === 4;
+  const step = view.showStep;
+  const at = (i: number) => (i === n ? view.dealer : showSeat(n, view.dealer, i));
+  if (at(step) === seat) return step === n ? (short ? 'Crib now' : 'Counting crib') : short ? 'Counting' : 'Counting now';
+  if (step + 1 <= n && at(step + 1) === seat) return step + 1 === n ? 'Crib next' : short ? 'Next' : 'Counts next';
+  const mine = Array.from({ length: n + 1 }, (_, i) => i).filter((i) => at(i) === seat);
+  if (mine.every((i) => i < step)) return 'Counted';
+  return seat === view.dealer ? 'Crib last' : short ? 'Later' : 'Counts later';
+}
+
+export interface TrackerStage {
+  /** "Your hand", "Sam’s hand", "Margaret’s crib". */
+  name: string;
+  /** Colour slot of the team that scores it. */
+  tone: number;
+}
+
+/** The show's steps for the one-line tracker (four or five steps): whose hand, and who scores it. */
+export function showStages(view: PlayerView, names: string[]): TrackerStage[] {
+  const n = view.players;
+  return Array.from({ length: n + 1 }, (_, i) => {
+    const s = i === n ? view.dealer : showSeat(n, view.dealer, i);
+    const whose = s === view.you ? 'Your' : possessive(names[s]);
+    return { name: `${whose} ${i === n ? 'crib' : 'hand'}`, tone: toneOfSeat(n, view.you, s) };
+  });
 }
 
 /** Labels for the show's step tracker: one step per hand, then the crib. */

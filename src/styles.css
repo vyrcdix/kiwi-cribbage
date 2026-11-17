@@ -257,7 +257,7 @@ h1, h2, h3, p { margin: 0; }
   display: flex; flex-direction: column; gap: 6px; padding: 10px;
   border-radius: var(--r-rail); border: 1.5px solid var(--tone); background: color-mix(in srgb, var(--tone) 6%, var(--c-enamel));
 }
-.team-box__head { text-align: left; font-size: var(--fs-caption); font-weight: 700; color: var(--tone); letter-spacing: 0.04em; }
+.team-box__head { text-align: left; font-size: var(--fs-caption); font-weight: 700; color: var(--tone-ink, var(--tone)); letter-spacing: 0.04em; }
 .seat {
   width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px;
   padding: 6px 12px; text-align: left; border-radius: 12px;
@@ -274,7 +274,7 @@ button.seat:disabled { cursor: default; color: inherit; }
 }
 .seat--open .seat__num { background: var(--c-edge); color: var(--c-ink); }
 .seat__name { flex: 1; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.seat__tag { flex: none; font-size: 12px; font-weight: 700; color: var(--tone); }
+.seat__tag { flex: none; font-size: 12px; font-weight: 700; color: var(--tone-ink, var(--tone)); }
 .seating__note { margin-top: 8px; font-size: 14px; color: var(--c-ink-soft); text-align: left; }
 .presence { flex: none; width: 9px; height: 9px; border-radius: 50%; }
 .presence.is-online { background: var(--c-green); }
@@ -352,22 +352,7 @@ button.seat:disabled { cursor: default; color: inherit; }
 .player__home svg { width: 18px; height: 18px; }
 .player--you .player__status .conn { font-size: var(--fs-caption); }
 
-/* Three and four players: a compact strip per other player, the team colour along the top. */
-.player--compact {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto;
-  column-gap: 6px; row-gap: 3px; align-content: center;
-  padding: 5px 8px 5px; border-radius: 10px;
-  border-top: 3px solid var(--tone);
-  transition: background-color var(--dur-card) linear, box-shadow var(--dur-card) linear;
-}
-.player--compact .player__avatar { display: none; }
-.player--compact .player__text { grid-area: 1 / 1 / 3 / 2; justify-content: center; gap: 4px; }
-.player--compact .player__text strong { font-size: 15px; }
-.player--compact .player__status { font-size: 12px; }
-.player--compact .player__score { grid-area: 1 / 2; font-size: 22px; min-width: 0; }
-.player--compact .player__held { grid-area: 2 / 2; --w: 11px; padding-left: 5px; justify-self: end; align-self: end; }
-.player--compact .player__held > span { margin-left: -5px; }
-.player--compact[data-active] { background: var(--c-enamel); box-shadow: inset 0 0 0 1.5px var(--c-ink); }
+/* Three and four players: compact strips, see the section at the end. */
 
 /* ---- board ---- */
 .table__board { min-width: 0; }
@@ -526,7 +511,7 @@ button.seat:disabled { cursor: default; color: inherit; }
 .tally { align-self: stretch; border-collapse: collapse; font-size: 15px; }
 .tally th, .tally td { padding: 7px 8px; text-align: right; }
 .tally th:first-child { text-align: left; }
-.tally thead th { font-size: var(--fs-caption); font-weight: 700; color: var(--tone, var(--c-ink-soft)); padding-block: 5px; max-width: 6em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tally thead th { font-size: var(--fs-caption); font-weight: 700; color: var(--tone-ink, var(--c-ink-soft)); padding-block: 5px; max-width: 6em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tally thead th:first-child { color: var(--c-ink-soft); font-weight: 600; }
 .tally tbody tr { border-top: 1px solid var(--c-edge); }
 .tally tbody th { font-weight: 500; }
@@ -627,18 +612,10 @@ button.seat:disabled { cursor: default; color: inherit; }
   .player--you { grid-area: you; align-self: end; }
   .player__score { flex-basis: 100%; text-align: left; font-size: 64px; line-height: 0.9; }
   .player[data-active] { box-shadow: inset 0 0 0 1.5px var(--c-ink); }
-  /* Several opponents: keep each card short so the rail holds them all. */
-  .player--compact { display: flex; flex-wrap: nowrap; border-top: 1.5px solid var(--c-ink); box-shadow: inset 0 4px 0 var(--tone); padding: 12px 14px; }
-  .player--compact .player__avatar { display: grid; width: 32px; height: 32px; font-size: 15px; }
-  .player--compact .player__text { min-width: 64px; }
-  .player--compact .player__score { flex-basis: auto; font-size: 32px; text-align: right; }
-  .player--compact .player__held { --w: 13px; padding-left: 7px; align-self: center; }
-  .player--compact .player__held > span { margin-left: -7px; }
   /* At game over the rail's tally holds the numbers; the stage keeps the verdict and the kiwi. */
   .table[data-phase='over'] .over .tally { display: none; }
   .table[data-phase='over'] .trophy { --t: 104px; }
   .table__tally th { white-space: nowrap; }
-  .player--compact[data-active] { box-shadow: inset 0 4px 0 var(--tone), inset 0 0 0 1.5px var(--c-ink); }
   .table__board { grid-area: board; justify-self: center; width: min(100%, 620px); }
   .table__tally { display: block; grid-area: tally; align-self: center; padding: 0 var(--sp-2); }
   .table__tally .tally { width: 100%; }
@@ -661,7 +638,7 @@ button.seat:disabled { cursor: default; color: inherit; }
   .log li { display: flex; justify-content: space-between; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--c-edge); }
   .log li b { font-family: var(--font-num); white-space: nowrap; }
   .log li[data-score] { font-weight: 700; }
-  .log li[data-score] b { color: var(--tone, var(--c-tomato)); font-family: inherit; }
+  .log li[data-score] b { color: var(--tone-ink, var(--c-tomato)); font-family: inherit; }
   .steps { font-size: 15px; }
   .table[data-players='3'] .steps li, .table[data-players='4'] .steps li { padding: 8px 14px; }
   @container top (max-height: 370px) {
@@ -685,3 +662,175 @@ button.seat:disabled { cursor: default; color: inherit; }
   .stage, .over { animation-duration: var(--dur-reduced); }
 }
 @keyframes count-fade { to { opacity: 0; } }
+
+/* ===================== Three and four players (handoff v2, design-handback-2 §2) ===================== */
+
+/* The team marker: a disc in the team colour with the player's emoji or initial;
+   mustard is a diamond with an ink outline, so shape carries it when colour does not. */
+.mark {
+  --m: 20px;
+  position: relative; isolation: isolate;
+  width: var(--m); height: var(--m); flex: none; box-sizing: border-box;
+  display: grid; place-items: center; border-radius: 50%;
+  color: var(--c-enamel); font: 700 calc(var(--m) * 0.56) / 1 var(--font-ui);
+}
+.mark[data-team='tomato'] { background: var(--c-tomato); }
+.mark[data-team='blue'] { background: var(--c-blue); }
+.mark[data-team='mustard'] { color: var(--c-ink); }
+.mark[data-team='mustard']::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; box-sizing: border-box;
+  background: var(--c-mustard); border: 1.5px solid var(--c-ink); transform: rotate(45deg) scale(0.8);
+}
+.mark__emoji { font-size: calc(var(--m) * 0.62); line-height: 1; }
+.mark[data-team='mustard'] .mark__emoji { font-size: calc(var(--m) * 0.5); }
+
+/* Compact strips: one two-line cell per other player, in the same 56 px zone.
+   Line one: marker, name (all the width that is left), dealer disc. Line two: the
+   cards held or a short status, then the score. */
+.table__opps--compact { gap: 6px; }
+.player.strip {
+  flex: 1 1 0; min-width: 0; height: var(--zone-player); padding: 5px 6px;
+  display: flex; flex-direction: column; align-items: stretch; justify-content: space-between; gap: 0;
+  border: 1.5px solid transparent; border-radius: 10px;
+  transition: background-color var(--dur-card) linear, border-color var(--dur-card) linear;
+}
+.player.strip[data-active] { border-color: var(--c-ink); background: var(--c-enamel); } /* whose turn it is */
+.strip__top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.strip__top .player__name { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; line-height: 1.2; }
+.strip__dealer {
+  width: 16px; height: 16px; flex: none; display: grid; place-items: center; border-radius: 50%;
+  background: var(--c-ink); color: var(--c-enamel); font-size: 10px; font-weight: 700;
+}
+.strip__bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; min-height: 22px; min-width: 0; }
+.strip__bottom .player__score { margin-left: auto; min-width: 0; font: 800 22px/1 var(--font-num); text-align: right; }
+.strip__held { --w: 16px; }
+.strip__status { min-width: 0; font-size: 12px; line-height: 1.2; color: var(--c-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Your strip: the way home is a 44 px round button at the far left; on your turn the
+   strip takes the same ink outline and enamel fill as the player whose turn it is. */
+.player__home { width: 44px; height: 44px; margin: 0 -6px 0 -8px; border: 0; background: none; }
+.player__home::after { inset: 0; }
+.player__home svg { width: 22px; height: 22px; }
+@media (max-width: 959px) {
+  .player--you { border: 1.5px solid transparent; border-radius: 24px; padding-right: 8px; transition: background-color var(--dur-card) linear, border-color var(--dur-card) linear; }
+  .player--you[data-active] { border-color: var(--c-ink); background: var(--c-enamel); }
+}
+
+/* Owner chips on played cards (three and four players): theirs sit high with the chip
+   above; yours sit lower with the chip below. Two players keep the plain bars. */
+.played__card--chip { gap: 4px; }
+.played__card--chip::before, .played__card--chip::after { content: none; }
+.played__card--chip[data-mine] { margin-top: 40px; flex-direction: column-reverse; }
+.table[data-players='3'] .played, .table[data-players='4'] .played { min-height: calc(var(--played-w) * 1.4 + 60px); }
+
+/* The show tracker for four or five steps: one line over a segment per step. */
+.tracker { align-self: center; width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.tracker p { display: flex; align-items: baseline; gap: 8px; font-size: 16px; min-width: 0; white-space: nowrap; }
+.tracker p strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tracker__of { flex: none; color: var(--c-ink-soft); }
+.tracker__next { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-caption); color: var(--c-ink-soft); }
+.tracker ol { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
+.tracker li { height: 8px; border-radius: 4px; box-sizing: border-box; border: 1.5px solid var(--team); }
+.tracker li[data-team='tomato'] { --team: var(--c-tomato); }
+.tracker li[data-team='blue'] { --team: var(--c-blue); }
+.tracker li[data-team='mustard'] { --team: var(--c-mustard-deep); }
+.tracker li[data-done] { background: var(--team); }
+.tracker li[data-team='mustard'][data-done] { background: var(--c-mustard); }
+.tracker li[aria-current] { outline: 2px solid var(--c-ink); outline-offset: 1px; }
+
+/* Mustard wherever the other teams are discs: the waiting room's seat numbers. */
+.seat.tone-2 .seat__num { position: relative; isolation: isolate; background: none; color: var(--c-ink); }
+.seat.tone-2 .seat__num::before { content: ''; position: absolute; inset: 0; z-index: -1; background: var(--c-mustard); border: 1.5px solid var(--c-ink); transform: rotate(45deg) scale(0.78); }
+
+/* ===================== The show, counted aloud ===================== */
+
+.show { flex: 1; min-height: 0; align-self: stretch; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+.show[data-playing] { cursor: pointer; }
+.show .combos { align-self: stretch; flex: 0 1 auto; }
+.show .combos li { padding: 3px 10px; font-size: 15px; animation: line-in 200ms var(--ease-out); }
+.show .combos li strong { font-weight: 600; }
+.show .combos li small { font-family: var(--font-num); font-size: 12.5px; color: var(--c-ink-soft); margin-left: 4px; white-space: nowrap; }
+.show .combos li b { font-size: 16px; }
+.saying {
+  align-self: stretch; flex: none; display: flex; align-items: center; gap: 12px; min-height: 64px;
+  padding: 6px 8px 6px 14px; border-radius: 12px; border: 1.5px solid transparent;
+  transition: background-color 160ms linear, border-color 160ms linear;
+}
+.saying[data-state='step'] { background: var(--c-butter-soft); border-color: var(--c-ink); }
+.saying[data-state='total'] { border-color: var(--c-ink); }
+.saying__text { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.saying__phrase { font-size: 20px; font-weight: 700; line-height: 1.15; animation: line-in 200ms var(--ease-out); }
+.saying[data-state='wait'] .saying__phrase { color: var(--c-ink-soft); font-weight: 600; }
+.saying__reason { font: 600 15px/1.2 var(--font-num); color: var(--c-ink-soft); }
+.saying__again {
+  margin: 2px 0 -6px -2px; padding: 6px 2px; min-height: 32px; border: 0; background: none; cursor: pointer;
+  color: var(--c-green); font-weight: 700; font-size: 14px; text-decoration: underline; text-underline-offset: 3px;
+}
+.saying__total { flex: none; min-width: 1.2em; text-align: right; font: 800 60px/0.9 var(--font-num); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; animation: tick-in 220ms var(--ease-out); }
+@keyframes tick-in { from { transform: translateY(35%); opacity: 0; } }
+
+@container top (max-height: 370px) {
+  .show { gap: 8px; }
+  .saying { min-height: 56px; }
+  .saying__phrase { font-size: 18px; }
+  .saying__total { font-size: 48px; }
+  .played__card--chip[data-mine] { margin-top: 30px; }
+  .table[data-players='3'] .played, .table[data-players='4'] .played { min-height: calc(46px * 1.4 + 50px); }
+}
+@container top (max-height: 310px) {
+  .table[data-phase='show'] .toprow { display: none; } /* the starter is in the show's row */
+  .show { gap: 6px; }
+  .saying { min-height: 50px; padding-block: 4px; }
+  .saying__phrase { font-size: 17px; }
+  .saying__reason { font-size: 13px; }
+  .saying__total { font-size: 42px; }
+  .show .combos li { padding-block: 2px; font-size: 14px; }
+  /* No height to spare at 360 x 740: your cards sit level with theirs and the chip below says whose. */
+  .played__card--chip { gap: 3px; }
+  .played__card--chip[data-mine] { margin-top: 19px; }
+  .table[data-players='3'][data-phase='pegging'] .stage, .table[data-players='4'][data-phase='pegging'] .stage { gap: 4px; }
+  .table[data-players='3'] .played, .table[data-players='4'] .played { min-height: calc(42px * 1.4 + 38px); }
+}
+
+/* "Go" said aloud, in the prompt line. */
+.table__prompt p[data-kind='note'] {
+  flex: 0 1 auto; padding: 5px 12px; border-radius: 12px 12px 12px 3px;
+  background: var(--c-enamel); box-shadow: inset 0 0 0 1.5px var(--c-ink);
+  animation: call-in 160ms var(--ease-out);
+}
+
+/* Counting pace (Profile). */
+.pace { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.pace__label { display: flex; flex-direction: column; line-height: 1.25; }
+.pace__label strong { font-size: 16px; }
+.pace__label span { font-size: var(--fs-caption); color: var(--c-ink-soft); }
+.segmented--start { justify-content: flex-start; }
+
+/* /deck: the treatment preview. */
+.treat { align-self: stretch; display: flex; flex-direction: column; gap: 12px; padding: 14px; background: var(--c-enamel); border: 1.5px solid var(--c-ink); border-radius: var(--r-rail); }
+.treat__head { display: flex; flex-direction: column; gap: 4px; }
+.treat__grid { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.treat__grid--full { --w: clamp(92px, 26vw, 132px); }
+.treat__grid--table { --w: 56px; gap: 6px; }
+
+@media (min-width: 960px) {
+  /* The left rail: each other player a short card, so the rail holds them all. */
+  .table__opps--compact { gap: var(--sp-3); }
+  .player.strip { height: auto; gap: 8px; padding: 12px 14px; background: var(--c-enamel); border: 1.5px solid var(--c-ink); border-radius: var(--r-rail); }
+  .player.strip[data-active] { box-shadow: inset 0 0 0 1.5px var(--c-ink); }
+  .strip__top .player__name { font-size: 17px; }
+  .strip__top .mark { --m: 26px !important; }
+  .strip__held { --w: 18px; }
+  .strip__bottom .player__score { flex-basis: auto; font-size: 32px; text-align: right; }
+  .strip__status { font-size: 14px; }
+  .player__home { width: 40px; height: 40px; margin: 0; }
+  .tracker p { font-size: 18px; }
+  .saying__total { font-size: 72px; }
+  .saying__phrase { font-size: 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The count keeps its pace; each step only fades. */
+  .saying__phrase, .saying__total, .show .combos li { animation: stage-in var(--dur-reduced) linear both; }
+  .player.strip, .player--you, .saying { transition: none; }
+}

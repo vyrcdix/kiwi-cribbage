@@ -54,9 +54,14 @@ export function RecordChart({ games, ids, names, colours, seasons, selected, onS
 
   // Running record, starting from 0–0 before the first game.
   const pts: [number, number][] = [[0, 0], ...games.map((g) => g.record)];
+  // Where both records are level the two lines would draw exactly on top of each
+  // other, so each is nudged half a line apart there (the first up, the second down)
+  // and both stay visible side by side.
+  const NUDGE = 1.6;
+  const yAt = (p: [number, number], k: 0 | 1) => y(p[k]) + (p[0] === p[1] ? (k === 0 ? -NUDGE : NUDGE) : 0);
   // A staircase: level until the game, then up a step for a win.
   const line = (k: 0 | 1) =>
-    pts.map((p, i) => (i === 0 ? `M${x(0).toFixed(1)} ${y(p[k]).toFixed(1)}` : `H${x(i).toFixed(1)}V${y(p[k]).toFixed(1)}`)).join('');
+    pts.map((p, i) => (i === 0 ? `M${x(0).toFixed(1)} ${yAt(p, k).toFixed(1)}` : `H${x(i).toFixed(1)}V${yAt(p, k).toFixed(1)}`)).join('');
 
   // Season changes inside the timeline.
   const breaks: { i: number; name: string }[] = [];
@@ -142,7 +147,7 @@ export function RecordChart({ games, ids, names, colours, seasons, selected, onS
         {games.map((g, i) => {
           const k = g.winner === ids[0] ? 0 : 1;
           const cx = x(i + 1);
-          const cy = y(g.record[k]);
+          const cy = yAt(g.record, k);
           const big = g.skunk > 0;
           const rr = big ? r * 1.45 : r;
           return (

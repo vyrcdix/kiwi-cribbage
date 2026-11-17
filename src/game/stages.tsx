@@ -6,10 +6,11 @@ import type { Play, PlayerView, Seat, SeatStats } from '../../shared/game';
 import { Trophy } from '../brand/Mark';
 import { type CardState, CardView } from '../cards/CardView';
 import { cardText } from '../lib/format';
-import type { ShowLine } from './callouts';
+import { type ShowLine, showRows } from './callouts';
 import { CSS_EASE, DUR, appear, flyFrom, reducedMotion, rememberRect, takeRect } from './motion';
 import type { PegDisplay } from './pegging';
-import { toneOfSeat } from './seating';
+import { type TrackerStage, toneOfSeat } from './seating';
+import { TeamMark, teamColourOf } from './TeamMark';
 
 // ---------- top row ----------
 
@@ -152,13 +153,32 @@ function PlayedCard({ play, view, names, state, fresh }: { play: Play; view: Pla
     rememberRect(`peg:${play.card}`, ref.current?.querySelector('.card'));
   });
   const tone = toneOfSeat(view.players, view.you, play.seat);
+  const who = mine ? 'Played by you' : `Played by ${names[play.seat]}`;
+  // Three and four players: a chip in the team colour with the player's initial says
+  // whose card it is (a bare diamond for mustard). Theirs sit high, chip above; yours
+  // still sit 20 px low with the chip below. Two players keep the plain bars.
+  if (view.players > 2) {
+    return (
+      <div
+        ref={ref}
+        className={`played__card played__card--chip tone-${tone}`}
+        data-by={mine ? 'you' : 'opp'}
+        data-mine={mine || undefined}
+        role="group"
+        aria-label={who}
+      >
+        <TeamMark tone={tone} initial={(names[play.seat]?.trim()[0] ?? '?').toUpperCase()} size={16} />
+        <CardView card={play.card} fluid state={state} />
+      </div>
+    );
+  }
   return (
     <div
       ref={ref}
       className={`played__card tone-${tone}`}
       data-by={mine ? 'you' : 'opp'}
       role="group"
-      aria-label={mine ? 'Played by you' : `Played by ${names[play.seat]}`}
+      aria-label={who}
     >
       <CardView card={play.card} fluid state={state} />
     </div>
@@ -233,21 +253,29 @@ export function PeggingStage({
 // ---------- the show ----------
 
 export function ShowStage({
-  cards, starter, lines, current, running, twentyNine, crib,
+  cards, starter, lines, current, playing, gap, twentyNine, crib, total, totalPhrase, onTap, onRecount,
 }: {
   crib: boolean;
   cards: Card[];
   starter: Card;
   lines: ShowLine[];
-  /** Index of the line being counted now; lines.length when the count is complete. */
+  /** Index of the step being counted; -1 while the cards come in; lines.length for the total beat or a finished count. */
   current: number;
-  /** Steps are running (otherwise the count is drawn complete and still). */
-  running: boolean;
+  /** The count is running (otherwise it is drawn finished and still). */
+  playing: boolean;
+  /** The moment with nothing lit between two steps. */
+  gap: boolean;
   twentyNine: boolean;
+  total: number;
+  totalPhrase: string;
+  /** A tap on the stage: the next step now. */
+  onTap: () => void;
+  /** Count the hand again from the start. */
+  onRecount: () => void;
 }) {
   const listRef = useRef<HTMLOListElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
-  const entering = running && current < 0;
+  const entering = playing && current < 0;
   // The four cards and the starter slide onto the stage (260 ms).
   useLayoutEffect(() => {
     if (!entering) return;
@@ -258,13 +286,25 @@ export function ShowStage({
       } else appear(el, { rise: 14, delay: i * 30, duration: 260 });
     });
   }, [entering, crib]);
-  const active = running && current >= 0 && current < lines.length ? lines[current] : null;
-  const stateOf = (c: Card): CardState => (active ? (active.cards.includes(c) ? 'lit' : 'dim') : '');
+
+  // The step on show in the big line: during the gap, still the one before.
+  const L = lines.length;
+  const finished = !playing || current >= L;
+  const shownIdx = finished ? L : gap ? current - 1 : current;
+  const step = shownIdx >= 0 && shownIdx < L ? lines[shownIdx] : null;
+  const stateOf = (c: Card): CardState => (playing && step && !gap ? (step.cards.includes(c) ? 'lit' : 'dim') : '');
+  const runningNow = finished ? total : step ? step.running : shownIdx >= 0 ? lines[shownIdx - 1]?.running ?? 0 : 0;
+  // Earlier steps above it: long counts fold finished groups (never the step on show).
+  const rows = finished
+    ? showRows(lines, -1)
+    // While counting, the big line below holds the current step, so the history folds
+    // a line sooner (five in all) to keep a long count on one screen at 360.
+    : shownIdx <= 0 ? [] : showRows(lines.slice(0, shownIdx + 1), shownIdx, 5).slice(0, -1);
+
   useLayoutEffect(() => {
-    const el = listRef.current?.querySelector('[aria-current]') ?? listRef.current?.lastElementChild;
+    const el = listRef.current?.lastElementChild;
     if (el && 'scrollIntoView' in el) (el as HTMLElement).scrollIntoView({ block: 'nearest' });
-  }, [current]);
-  const shown = running ? lines.slice(0, Math.max(0, current + 1)) : lines;
+  }, [shownIdx, rows.length]);
 
   if (twentyNine) {
     return (
@@ -279,8 +319,11 @@ export function ShowStage({
     );
   }
 
+  // "twenty‑six" must not break at its hyphen.
+  const nb = (t: string) => t.replace(/-/g, '‑');
+  const phrase = nb(step ? step.name : finished ? totalPhrase : 'Counting…');
   return (
-    <>
+    <div className="show" data-playing={playing || undefined} onClick={playing ? onTap : undefined}>
       <div className="stage__row stage__row--show" ref={rowRef}>
         {cards.map((c, i) => (
           <span key={c} className="show__card" style={{ '--i': i } as CSSProperties}>
@@ -291,19 +334,61 @@ export function ShowStage({
           <CardView card={starter} fluid state={stateOf(starter)} label={`Starter: ${cardText(starter)}`} />
         </span>
       </div>
-      <ol className="combos" ref={listRef}>
-        {lines.length === 0 ? (
-          <li aria-current={running ? 'true' : undefined}><span><strong>Nineteen</strong> not a single point</span><b>0</b></li>
-        ) : (
-          shown.map((l, i) => (
-            <li key={i} aria-current={running && i === current ? 'true' : undefined}>
-              <span><strong>{l.name}</strong> {l.detail}</span>
+      {rows.length > 0 && (
+        <ol className="combos" ref={listRef} aria-label="Counted so far">
+          {rows.map((l) => (
+            <li key={l.key} data-folded={l.count > 1 || undefined}>
+              {l.count > 1
+                ? <span><strong>{l.name}</strong>, {l.detail}</span>
+                : <span><strong>{nb(l.name)}</strong> <small>{l.detail}</small></span>}
               <b>{l.running}</b>
             </li>
-          ))
-        )}
+          ))}
+        </ol>
+      )}
+      <div className="saying" data-state={step && !gap ? 'step' : finished ? 'total' : 'wait'}>
+        <div className="saying__text" aria-live="polite">
+          <p className="saying__phrase" key={`p${shownIdx}`}>{phrase}</p>
+          {step && <p className="saying__reason">{step.detail}</p>}
+          {finished && L > 0 && !playing && (
+            <button type="button" className="saying__again" onClick={(e) => { e.stopPropagation(); onRecount(); }}>Count again</button>
+          )}
+        </div>
+        <b className="saying__total" key={`t${runningNow}`} aria-label={`${runningNow} points`}>{runningNow}</b>
+      </div>
+    </div>
+  );
+}
+
+// ---------- the show tracker, four or five steps ----------
+
+/**
+ * One line, "Sam’s hand, 2 of 5" with "Next: Margaret’s hand" at the right, over a
+ * segment per step coloured by the team that scores it (handoff v2 ShowTracker).
+ * Five pills do not fit at 360; three-step games keep the pills.
+ */
+export function ShowTracker({ stages, current }: { stages: TrackerStage[]; current: number }) {
+  const at = Math.min(stages.length - 1, Math.max(0, current));
+  const next = stages[at + 1];
+  return (
+    <div className="tracker">
+      <p>
+        <strong>{stages[at].name}</strong>
+        <span className="tracker__of">{at + 1} of {stages.length}</span>
+        {next && <span className="tracker__next">Next: {next.name}</span>}
+      </p>
+      <ol aria-label="Show progress">
+        {stages.map((st, i) => (
+          <li
+            key={i}
+            data-team={teamColourOf(st.tone)}
+            data-done={i <= at || undefined}
+            aria-current={i === at ? 'step' : undefined}
+            aria-label={st.name}
+          />
+        ))}
       </ol>
-    </>
+    </div>
   );
 }
 

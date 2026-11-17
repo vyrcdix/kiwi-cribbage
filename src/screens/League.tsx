@@ -6,7 +6,9 @@ import { api, errorMessage } from '../lib/api';
 import { navigate, onLink } from '../lib/router';
 import { useApi, useSession } from '../lib/session';
 import { Avatar } from '../ui/Avatar';
-import { Empty, ErrorLine, Form, Loading, PageHead, SeasonPicker, Section, ShareBox, pct, plural } from '../ui/bits';
+import { Confirm, Empty, ErrorLine, Form, Loading, PageHead, SeasonPicker, Section, ShareBox, pct, plural } from '../ui/bits';
+import type { Fixture } from '../../shared/league';
+import { fixtureTitle } from '../lib/league-text';
 import { FixtureRow, PendingRow, ResultRow } from '../ui/games';
 import { Shell } from '../ui/Shell';
 import { inviteUrl } from '../lib/router';
@@ -114,6 +116,26 @@ export function League() {
   const [allQueue, setAllQueue] = useState(false);
   const [moreResults, setMoreResults] = useState(false);
   const [starting, setStarting] = useState<string | null>(null);
+  // The commissioner can cancel anyone's queued fixture (the API allows it), with a confirmation.
+  const [cancelling, setCancelling] = useState<Fixture | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const cancel = async () => {
+    if (!cancelling) return;
+    setCancelBusy(true);
+    try {
+      await api.cancelFixture(token, cancelling.id);
+      setCancelling(null);
+      setCancelError(null);
+      fixtures.reload();
+    } catch (e) {
+      setCancelError(errorMessage(e));
+      setCancelling(null);
+      fixtures.reload();
+    } finally {
+      setCancelBusy(false);
+    }
+  };
 
   const pend = [...(pending.data?.games ?? [])].sort((a, b) =>
     a.status === b.status ? b.idleSeconds - a.idleSeconds : a.status === 'active' ? -1 : 1,
@@ -215,13 +237,23 @@ export function League() {
                       n={queue.indexOf(f) + 1}
                       meId={meId}
                       action={
-                        f.status === 'queued' && f.seats.some((p) => p.id === meId) ? (
-                          <button type="button" className="btn btn--small" onClick={() => play(f.id)} disabled={starting !== null}>Play</button>
+                        f.status === 'queued' && (f.seats.some((p) => p.id === meId) || isCommissioner) ? (
+                          <span className="fixture__actions">
+                            {f.seats.some((p) => p.id === meId) && (
+                              <button type="button" className="btn btn--small" onClick={() => play(f.id)} disabled={starting !== null}>Play</button>
+                            )}
+                            {isCommissioner && (
+                              <button type="button" className="btn btn--small btn--quiet btn--warn" onClick={() => { setCancelError(null); setCancelling(f); }} aria-label={`Cancel ${fixtureTitle(f, meId)}`}>
+                                Cancel
+                              </button>
+                            )}
+                          </span>
                         ) : undefined
                       }
                     />
                   ))}
                 </ol>
+                {cancelError && <p className="form-error" role="alert">{cancelError}</p>}
                 {queue.length > QUEUE_SHOWN && (
                   <button type="button" className="link" onClick={() => setAllQueue((v) => !v)}>
                     {allQueue ? 'Show fewer' : `Show all ${queue.length}`}
@@ -236,6 +268,24 @@ export function League() {
           </Section>
         </div>
       </div>
+      {cancelling && (
+        <Confirm
+          title="Cancel this fixture?"
+          confirm="Cancel fixture"
+          dismiss="Keep it"
+          danger
+          busy={cancelBusy}
+          onConfirm={cancel}
+          onCancel={() => setCancelling(null)}
+        >
+          <p>
+            <strong>{fixtureTitle(cancelling, meId)}</strong>
+            {' · '}
+            {cancelling.kind === 'round-robin' ? 'round robin' : `challenge by ${cancelling.createdBy.id === meId ? 'you' : cancelling.createdBy.name}`}.
+          </p>
+          <p className="muted">It comes out of the queue for everyone. As commissioner you can cancel anyone’s fixture; nothing is recorded against the players.</p>
+        </Confirm>
+      )}
     </Shell>
   );
 }

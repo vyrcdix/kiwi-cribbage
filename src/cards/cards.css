@@ -71,10 +71,14 @@
 
 .card__photo { position: absolute; inset: 0; background: var(--stock); }
 .card__photo img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: 50% 35%; pointer-events: none; }
-/* Duotone fallback: greys multiply onto the stock, then the ink lifts the shadows. */
-.card__photo[data-treatment='duotone'] img { filter: grayscale(1) contrast(1.15); mix-blend-mode: multiply; }
-.card__photo[data-treatment='duotone']::before { content: ''; position: absolute; inset: 0; z-index: 1; background: var(--ink); mix-blend-mode: lighten; }
-/* Soft vignette at the frame, both treatments. */
+/* Treatments are baked (scripts/bake-deck.mjs) or rendered in the browser with the same
+   code (photoTreatment.ts), so a treated image arrives already treated and CSS adds only
+   the vignette. While an unbaked photo is waiting for its render, this approximates
+   'tinted'; there is no CSS path for tritone (handoff v2 styles.css). */
+.card__photo[data-unbaked] img { filter: saturate(0.55) contrast(1.05); }
+.card__photo[data-unbaked]::before { content: ''; position: absolute; inset: 0; z-index: 1; background: var(--ink); opacity: 0.18; mix-blend-mode: soft-light; }
+.card__mini-slot[data-unbaked] { filter: saturate(0.55) contrast(1.05); }
+/* Soft vignette at the frame, every treatment. */
 .card__photo::after {
   content: ''; position: absolute; inset: 0; z-index: 2;
   background: radial-gradient(ellipse at 50% 40%, transparent 55%, color-mix(in srgb, var(--ink) 35%, transparent) 100%);

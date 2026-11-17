@@ -8,7 +8,8 @@ import { type PlayerCount, type Seat, teamSeats } from '../../shared/game';
 import type { HandRecord, HandsResponse, PegEntry, PlayerCard, ShowRecord } from '../../shared/league';
 import { describeItem } from '../../shared/scoring';
 import { CardView } from '../cards/CardView';
-import { Board, type BoardLane } from '../game/Board';
+import { Board, type BoardTeam } from '../game/Board';
+import { teamColourOf } from '../game/TeamMark';
 import { showLines } from '../game/callouts';
 import { teamsInOrder, toneOf, toneOfSeat } from '../game/seating';
 import { api } from '../lib/api';
@@ -152,11 +153,11 @@ function Show({ c, s, starter }: { c: Ctx; s: ShowRecord; starter: Card | null }
         lines.length ? (
           <ol className="show-rec__lines">
             {lines.map((l, i) => (
-              <li key={i}><span><strong>{l.name}</strong> {l.detail}</span><b>{l.running}</b></li>
+              <li key={i}><span><strong>{l.name}</strong> <small>{l.detail}</small></span><b>{l.running}</b></li>
             ))}
           </ol>
         ) : (
-          <p className="show-rec__nineteen"><strong>Nineteen</strong> — not a single point.</p>
+          <p className="show-rec__nineteen"><strong>Nineteen</strong> — nothing this time.</p>
         )
       ) : (
         <p className="caption">Not counted: the game was already over.</p>
@@ -229,10 +230,10 @@ function ReplayBody({ d }: { d: HandsResponse }) {
   }, [hands.length]);
 
   const c: Ctx = { n: d.players, seats: d.seats, view: d.you ?? 0, meId: profile.id };
-  const lanes: BoardLane[] = useMemo(() => {
+  const lanes: BoardTeam[] = useMemo(() => {
     const order = teamsInOrder(d.players, d.you ?? 0);
     return [...order.slice(1), order[0]].map((team) => ({
-      team, tone: toneOf(d.players, d.you ?? 0, team), name: teamSeats(d.players, team).map((s) => d.seats[s]?.name ?? '').join(' & '),
+      team, colour: teamColourOf(toneOf(d.players, d.you ?? 0, team)), name: teamSeats(d.players, team).map((s) => d.seats[s]?.name ?? '').join(' & '),
     }));
   }, [d]);
   const h = hands[i];
@@ -293,7 +294,7 @@ function ReplayBody({ d }: { d: HandsResponse }) {
 
       <div className="replay-grid">
         <div className="replay-board">
-          <Board lanes={lanes} scores={h.scoresAfter} back={h.scoresBefore} finishLit={h.endedGame} />
+          <Board teams={lanes} scores={h.scoresAfter} back={h.scoresBefore} finishLit={h.endedGame} />
           <TeamScore c={c} scores={h.scoresAfter} before={h.scoresBefore} />
           <p className="caption">Score after hand {h.handNo}; the back pegs show where it started.</p>
         </div>

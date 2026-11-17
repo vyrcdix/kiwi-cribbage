@@ -9,7 +9,7 @@
 //   /commissioner         the commissioner's tools
 //   /invite/:token        a league invite (sign-up)
 //   /link/:code           sign in on this device with a one-time code
-//   /g/:CODE              a game; /deck the deck gallery; /dev/table (development)
+//   /g/:CODE              a game; /deck the deck gallery; /dev/table, /dev/sheet, /dev/cvd (development)
 import { useEffect, useState } from 'react';
 
 const NAV_EVENT = 'cabbage:navigate';
@@ -41,7 +41,7 @@ export function parseRoute(path: string): Route {
   if (p === '/me') return { name: 'profile' };
   if (p === '/commissioner') return { name: 'commissioner' };
   if (p === '/deck') return { name: 'deck' };
-  if (import.meta.env.DEV && p === '/dev/table') return { name: 'dev' };
+  if (import.meta.env.DEV && (p === '/dev/table' || p === '/dev/sheet' || p === '/dev/cvd')) return { name: 'dev' };
   let m = new RegExp(`^/stats/${ID}/${ID}$`).exec(p);
   if (m) return { name: 'stats', a: m[1], b: m[2] };
   m = new RegExp(`^/players/${ID}$`).exec(p);

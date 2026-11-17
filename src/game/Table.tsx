@@ -18,13 +18,16 @@ import { type Beat, stageOf, useDirector } from './director';
 import { Flights, fly } from './Flights';
 import { haptic } from './haptics';
 import { CSS_EASE, DUR, reducedMotion, rememberRect, skipAnimations } from './motion';
+import { countTiming, usePace } from './pace';
+import { countAloud } from './countAloud';
 import { pegDisplay } from './pegging';
 import { PlayerStrip } from './PlayerStrip';
 import {
-  compactStatus, cribLabel, discardPrompt, listNames, othersClockwise, overCopy, relationOf, showStepLabels, statusLine,
-  teamName, teamsInOrder, toneOf, toneOfSeat, waitingText,
+  compactStatus, cribLabel, discardPrompt, listNames, othersClockwise, overCopy, relationOf, showStages, showStatusOf,
+  showStepLabels, statusLine, teamName, teamsInOrder, toneOf, toneOfSeat, waitingText,
 } from './seating';
-import { CutStage, DealStage, OverStage, PeggingStage, ShowStage, Tally, type TallyColumn, TopRow } from './stages';
+import { CutStage, DealStage, OverStage, PeggingStage, ShowStage, ShowTracker, Tally, type TallyColumn, TopRow } from './stages';
+import { teamColourOf } from './TeamMark';
 import { CardView } from '../cards/CardView';
 import { navigate } from '../lib/router';
 
@@ -44,57 +47,103 @@ interface Props {
   next?: { label: string; busy: boolean; error: string | null; go: () => void } | null;
 }
 
-/** The show's steps: cards slide in, each combination 450 ms, the total holds 400 ms. */
+/**
+ * The show counted aloud, step by step at a human pace (owner's request; a deliberate
+ * departure from motion.md's 450 ms a step): the cards slide in, then each
+ * combination gets about 1.4 s (relaxed) with a short moment of nothing lit between
+ * steps, then the total holds as its own beat. A 29 ends on the fan instead, which
+ * cannot be skipped. `next` advances a step at once (a tap on the stage), `jump`
+ * goes to the end, `restart` counts again from the start. `onDone` fires once per
+ * show, when the first count ends; a recount never fires it again.
+ */
 function useShowSequence(key: string | null, count: number, running: boolean, is29: boolean, onDone: () => void) {
-  const [st, setSt] = useState({ key, i: -1, nine: false });
-  if (st.key !== key) setSt({ key, i: -1, nine: false });
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [pace] = usePace();
+  const T = countTiming(pace);
+  // i: -1 entering, 0 … count-1 a step, count the total beat. playing: the count is running.
+  const [st, setSt] = useState({ key, i: -1, gap: false, nine: false, playing: false });
+  if (st.key !== key) setSt({ key, i: -1, gap: false, nine: false, playing: false });
   const done = useRef(onDone);
   done.current = onDone;
-  const nineRef = useRef(false);
-
-  useEffect(() => {
-    if (!running) return;
-    const at = (ms: number, f: () => void) => timers.current.push(setTimeout(f, ms));
-    setSt({ key, i: -1, nine: false });
-    nineRef.current = false;
-    const enter = reducedMotion() ? DUR.reduced : 260;
-    const steps = Math.max(1, count);
-    for (let k = 0; k < steps; k++) at(enter + k * DUR.showStep, () => setSt((s) => ({ ...s, i: k })));
-    const end = enter + steps * DUR.showStep;
-    if (is29) {
-      // On his nobs: the rim turns butter, the cards fan out, "29" holds 1.6 s and cannot be skipped.
-      at(end, () => {
-        nineRef.current = true;
-        setSt((s) => ({ ...s, nine: true }));
-      });
-      at(end + 300 + 1600, () => {
-        nineRef.current = false;
-        setSt((s) => ({ ...s, i: count, nine: false }));
-        done.current();
-      });
-    } else {
-      at(end + DUR.showHold, () => {
-        setSt((s) => ({ ...s, i: count }));
-        done.current();
-      });
+  const fired = useRef<string | null>(null);
+  const finish = useCallback(() => {
+    if (key !== null && fired.current !== key) {
+      fired.current = key;
+      done.current();
     }
-    return () => {
-      timers.current.forEach(clearTimeout);
-      timers.current = [];
-    };
-  }, [running, key, count, is29]);
+  }, [key]);
 
+  // The director says go: start counting (once per show).
+  useEffect(() => {
+    if (running && key !== null && fired.current !== key) setSt({ key, i: -1, gap: false, nine: false, playing: true });
+  }, [running, key]);
+
+  // One timer for whatever comes next.
+  useEffect(() => {
+    if (!st.playing || st.key !== key) return;
+    let ms: number;
+    let to: () => void;
+    if (st.nine) {
+      ms = 300 + 1600;
+      to = () => { setSt((s) => ({ ...s, nine: false, playing: false, i: count })); finish(); };
+    } else if (st.gap) {
+      ms = T.gap;
+      to = () => setSt((s) => ({ ...s, gap: false }));
+    } else if (st.i < 0) {
+      ms = reducedMotion() ? DUR.reduced : 260;
+      to = () => setSt((s) => ({ ...s, i: 0, gap: count > 0 }));
+    } else if (st.i < count) {
+      ms = T.step - T.gap;
+      to = () => setSt((s) => ({ ...s, i: s.i + 1, gap: true }));
+    } else {
+      ms = is29 ? 0 : T.total;
+      to = is29
+        ? () => setSt((s) => ({ ...s, nine: true }))
+        : () => { setSt((s) => ({ ...s, playing: false })); finish(); };
+    }
+    const t = setTimeout(to, ms);
+    return () => clearTimeout(t);
+  }, [st, key, count, is29, T.gap, T.step, T.total, finish]);
+
+  const cur = useRef(st);
+  cur.current = st;
+
+  /** A tap on the stage: on to the next step now. */
+  const next = useCallback(() => {
+    const s = cur.current;
+    if (!s.playing || s.nine) return;
+    if (s.i < count) setSt({ ...s, i: s.i + 1, gap: false });
+    else if (is29) setSt({ ...s, nine: true });
+    else {
+      setSt({ ...s, playing: false });
+      finish();
+    }
+  }, [count, is29, finish]);
+
+  /** Straight to the end (Continue pressed early). The 29's fan still plays out. */
   const jump = useCallback(() => {
-    if (nineRef.current) return false;
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
-    setSt((s) => ({ ...s, i: count, nine: false }));
-    done.current();
+    const s = cur.current;
+    if (s.nine) return false;
+    if (s.playing && is29 && fired.current !== key) {
+      setSt({ ...s, i: count, gap: false, nine: true });
+      return true;
+    }
+    setSt({ ...s, i: count, gap: false, playing: false });
+    finish();
     return true;
-  }, [count]);
+  }, [count, is29, finish, key]);
 
-  return { current: running ? st.i : count, nine: running && st.nine, jump };
+  const restart = useCallback(() => setSt((s) => ({ ...s, i: -1, gap: false, nine: false, playing: true })), []);
+
+  const playing = st.playing && st.key === key;
+  return {
+    current: playing ? st.i : count,
+    gap: playing && st.gap,
+    nine: playing && st.nine,
+    playing,
+    /** The count is still going (Continue would skip it). */
+    counting: playing && st.i < count,
+    next, jump, restart,
+  };
 }
 
 const cribRect = (): DOMRect | null => {
@@ -118,6 +167,8 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
   const ctx = useMemo(() => ({ you, names }), [you, names]);
   const { dir, seated, showDone } = useDirector(view, beat, ctx);
   const stage = dir.stage ?? stageOf(view.phase);
+  const connText = status === 'open' ? null : status === 'failed' ? 'Disconnected' : 'Reconnecting…';
+  const offline = connText !== null;
 
   // ---- scores in the strips update as the peg seats ----
   const [shown, setShown] = useState<number[]>(() => [...view.scores]);
@@ -320,12 +371,12 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
   const iCut = view.phase === 'cut' && cutter === you;
   const unplayable = myTurn ? view.hand.filter((c) => view.count + value(c) > 31) : [];
   let text = '';
-  let button: { label: string; onPress: () => void; disabled?: boolean } | null = null;
+  let button: { label: string; onPress: () => void; disabled?: boolean; quiet?: boolean } | null = null;
   const waiting = waitingText(view, names, msg.online);
   if (view.phase === 'discard') {
     if (!iDiscarded && !sentNow) {
       text = discardPrompt(n, names, you, view.dealer, sel.length);
-      button = { label: 'Send', onPress: send, disabled: sel.length !== need || pending };
+      button = { label: 'Send', onPress: send, disabled: sel.length !== need || pending || offline };
     } else text = waiting;
   } else if (view.phase === 'cut') {
     text = iCut ? 'Tap the deck to cut' : waiting;
@@ -336,11 +387,14 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
         : 'Your turn: lay a card';
     } else text = waiting;
   } else if (view.phase === 'show' || stage === 'show') {
-    const counting = seq.current < lines.length;
+    const counting = seq.counting;
     text = counting ? `${showTitle} · ${runningTotal}` : `${showTitle}: ${result?.total === 0 ? 'nineteen' : result?.total ?? 0}`;
     if (view.phase === 'show') {
       if (view.acks[you] && !counting) text = waiting;
-      else if (!view.acks[you]) {
+      else if (counting && !view.acks[you]) {
+        // Continue appears when the count is finished; pressed early, it skips to the total first.
+        button = { label: 'Skip to total', quiet: true, onPress: () => { seq.jump(); } };
+      } else if (!view.acks[you]) {
         button = {
           label: view.showStep === n ? 'Next deal' : 'Continue',
           disabled: pending,
@@ -361,11 +415,18 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
   // ---- strips ----
   const lanes = useMemo(() => {
     const order = teamsInOrder(n, you);
-    return [...order.slice(1), order[0]].map((team) => ({ team, tone: toneOf(n, you, team), name: teamName(n, names, you, team) }));
+    return [...order.slice(1), order[0]].map((team) => ({ team, colour: teamColourOf(toneOf(n, you, team)), name: teamName(n, names, you, team) }));
   }, [n, you, names]);
   const busySeat = (s: Seat) => (view.phase === 'peg' && view.turn === s) || (view.phase === 'cut' && cutter === s);
   const compact = n > 2;
-  const connText = status === 'open' ? null : status === 'failed' ? 'Disconnected' : 'Reconnecting…';
+  // Line two of a compact cell: the cards held, or a short status when that says more.
+  const compactLine = (s: Seat): { text: string; first: boolean } => {
+    if (msg.online[s] === false) return { text: 'Offline', first: true };
+    if (stage === 'show' && view.showResult) return { text: showStatusOf(view, s), first: true };
+    return { text: compactStatus(view, s, msg.online, shown), first: false };
+  };
+  const partnerSeat = n === 4 ? others.find((s) => relationOf(n, you, s) === 'partner') : undefined;
+  const yourLabel = partnerSeat !== undefined ? `You and ${names[partnerSeat]}` : names[you];
 
   // ---- hand zone ----
   const handCards = sentNow ? view.hand.filter((c) => !sentNow.cards.includes(c)) : view.hand;
@@ -390,27 +451,33 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
       style={{ '--opps': others.length } as CSSProperties}
     >
       <div className={`table__opps${compact ? ' table__opps--compact' : ''}`} data-count={others.length}>
-        {others.map((s) => (
-          <PlayerStrip
-            key={s}
-            who="opp"
-            seat={s}
-            name={names[s]}
-            tone={toneOfSeat(n, you, s)}
-            score={shown[teamOf(n, s)] ?? 0}
-            status={compact ? compactStatus(view, s, msg.online, shown) : statusLine(view, s, msg.online, shown)}
-            held={view.handCounts[s]}
-            dealer={view.dealer === s}
-            partner={relationOf(n, you, s) === 'partner'}
-            active={busySeat(s)}
-            compact={compact}
-            emoji={emojis?.[s]}
-          />
-        ))}
+        {others.map((s) => {
+          const line = compact ? compactLine(s) : null;
+          const isPartner = relationOf(n, you, s) === 'partner';
+          return (
+            <PlayerStrip
+              key={s}
+              who="opp"
+              seat={s}
+              name={names[s]}
+              tone={toneOfSeat(n, you, s)}
+              // Your partner's cell has no score: your own strip carries the team's.
+              score={compact && isPartner ? null : shown[teamOf(n, s)] ?? 0}
+              status={line ? line.text : statusLine(view, s, msg.online, shown)}
+              statusFirst={line?.first}
+              held={view.handCounts[s]}
+              dealer={view.dealer === s}
+              partner={isPartner}
+              active={busySeat(s)}
+              compact={compact}
+              emoji={emojis?.[s]}
+            />
+          );
+        })}
       </div>
 
       <div className="table__board">
-        <Board lanes={lanes} scores={boardScores} back={boardBack} onSeated={onSeated} finishLit={dir.finishLit || stage === 'over'} />
+        <Board teams={lanes} scores={boardScores} back={boardBack} onSeated={onSeated} finishLit={dir.finishLit || stage === 'over'} />
       </div>
 
       <section className="table__top" aria-label="Table" data-rim={is29 && stage === 'show' && (seq.nine || seq.current >= lines.length) ? 'butter' : undefined}>
@@ -450,8 +517,13 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
               starter={view.starter}
               lines={lines}
               current={seq.current}
-              running={dir.showRun === showKey && seq.current < lines.length}
+              playing={seq.playing}
+              gap={seq.gap}
               twentyNine={seq.nine}
+              total={result.total}
+              totalPhrase={countAloud(result.items).totalPhrase}
+              onTap={seq.next}
+              onRecount={seq.restart}
             />
           )}
           {stage === 'over' && copy && (
@@ -478,13 +550,13 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
           <>
             <p aria-live="polite" data-kind={promptKind} className={dir.call ? `tone-${dir.callTone ?? 0}` : undefined}>{promptText}</p>
             {button && (
-              <button type="button" className="btn" onClick={button.onPress} disabled={button.disabled}>{button.label}</button>
+              <button type="button" className={`btn${button.quiet ? ' btn--quiet' : ''}`} onClick={button.onPress} disabled={button.disabled}>{button.label}</button>
             )}
           </>
         )}
       </div>
 
-      <div className="table__hand">
+      <div className="table__hand" data-offline={offline || undefined}>
         {stage === 'over' && next && (
           <button type="button" className="btn btn--wide btn--quiet" onClick={rematch.go} disabled={rematch.busy}>
             {msg.next ? 'Join rematch' : rematch.busy ? 'Shuffling…' : 'Rematch'}
@@ -493,7 +565,8 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
         {stage === 'over' && (
           <button type="button" className="btn btn--wide btn--quiet" onClick={() => navigate('/')}>Home</button>
         )}
-        {stage === 'show' && (
+        {stage === 'show' && n > 2 && <ShowTracker stages={showStages(view, names)} current={view.showStep} />}
+        {stage === 'show' && n === 2 && (
           <ol className="steps" style={{ '--steps': n + 1 } as CSSProperties}>
             {showStepLabels(view, names).map((label, i) => {
               const seat = i === n ? view.dealer : showSeat(n, view.dealer, i);
@@ -509,8 +582,9 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
           const discarding = view.phase === 'discard' && !iDiscarded && !sentNow;
           const legal = myTurn && view.count + value(c) <= 31;
           const picked = discarding && sel.includes(c);
-          const dim = myTurn && !legal;
-          const enabled = (discarding || legal) && !pending;
+          const dim = (myTurn && !legal) || offline;
+          // While reconnecting the hand is dimmed and nothing in it can be pressed.
+          const enabled = (discarding || legal) && !pending && !offline;
           return (
             <button
               key={c}
@@ -521,7 +595,7 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
               aria-pressed={discarding ? picked : undefined}
               onClick={() => (discarding ? toggle(c) : play(c))}
             >
-              <CardView card={c} fluid state={picked ? 'picked' : dim ? 'dim' : ''} label={dim ? `${cardText(c)} (would go past 31)` : undefined} />
+              <CardView card={c} fluid state={offline ? 'dim' : picked ? 'picked' : dim ? 'dim' : ''} label={myTurn && !legal ? `${cardText(c)} (would go past 31)` : undefined} />
             </button>
           );
         })}
@@ -530,7 +604,8 @@ export function Table({ msg, view, names, status, pending, act, beat, toast, rem
       <PlayerStrip
         who="you"
         seat={you}
-        name={names[you]}
+        name={yourLabel}
+        avatarName={names[you]}
         tone={0}
         score={shown[mine] ?? 0}
         status={connText ? <span className="conn" role="status">{status !== 'failed' && <span className="conn__spin" aria-hidden="true" />}{connText}</span> : statusLine(view, you, msg.online, shown)}

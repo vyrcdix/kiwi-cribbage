@@ -2,13 +2,14 @@
 // they follow you to every device and to the table), your signed-in devices,
 // linking a new one by QR code, inviting someone, and signing out.
 import { type CSSProperties, type FormEvent, useState } from 'react';
-import { MAX_NAME, isEmoji } from '../../shared/league';
+import { MAX_NAME, isSingleEmoji } from '../../shared/league';
 import { card } from '../../shared/cards';
 import type { DeviceLinkCode } from '../../shared/league';
 import { CardView } from '../cards/CardView';
 import { DECKS, DECK_ORDER, DEFAULT_DECK } from '../cards/decks';
 import { useFourColour } from '../cards/prefs';
 import { api, clearProfile, errorMessage } from '../lib/api';
+import { usePace } from '../game/pace';
 import { linkUrl, navigate, onLink } from '../lib/router';
 import { useApi, useSession } from '../lib/session';
 import { AVATAR_COLOURS, Avatar } from '../ui/Avatar';
@@ -87,7 +88,7 @@ function Picture() {
           onSubmit={(e) => {
             e.preventDefault();
             const v = custom.trim();
-            if (!isEmoji(v)) return setError('That needs to be a single emoji.');
+            if (!isSingleEmoji(v)) return setError('That needs to be a single emoji.');
             void set(v, colour);
             setCustom('');
           }}
@@ -152,9 +153,27 @@ function Decks() {
           <span>Diamonds blue, clubs green — on every device you use</span>
         </span>
       </label>
+      <PaceSetting />
       <p className="caption">You see your own deck at the table; everyone else sees theirs.</p>
       <a className="link" href={`/deck?d=${current}`} onClick={(e) => onLink(e, `/deck?d=${current}`)}>See the whole deck</a>
       {error && <p className="form-error" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+/** How fast the show counts a hand aloud. Kept on this device for now. */
+function PaceSetting() {
+  const [pace, setPace] = usePace();
+  return (
+    <div className="pace">
+      <p className="pace__label"><strong>Counting pace</strong><span>How fast hands are counted aloud at the show · this device</span></p>
+      <div className="segmented segmented--start" role="radiogroup" aria-label="Counting pace">
+        {(['relaxed', 'brisk'] as const).map((p) => (
+          <button key={p} type="button" role="radio" aria-checked={pace === p} className="segmented__opt" onClick={() => setPace(p)}>
+            {p === 'relaxed' ? 'Relaxed' : 'Brisk'}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
