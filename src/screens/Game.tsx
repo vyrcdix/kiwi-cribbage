@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type Action, other } from '../../shared/game';
-import { describeEvents, useCallouts } from '../game/callouts';
+import type { Action } from '../../shared/game';
+import type { Fixture } from '../../shared/league';
+import type { Beat } from '../game/director';
 import { Table } from '../game/Table';
 import { TopBar } from '../game/TopBar';
 import { Waiting } from '../game/Waiting';
 import { type Profile, api, errorMessage, errorStatus } from '../lib/api';
 import { navigate } from '../lib/router';
+import { useOptionalSession } from '../lib/session';
+import { nextLabel } from '../lib/league-text';
 import { type StateMsg, useGameSocket } from '../lib/useGameSocket';
+
+/** Display name by seat; yours falls back to your profile, open seats to "Open seat". */
+function seatNames(m: StateMsg, myName: string): string[] {
+  return m.players.map((p, s) => p?.name ?? (s === m.you ? myName : 'Open seat'));
+}
+
 
 type JoinState =
   | { kind: 'joining' }
@@ -44,9 +53,14 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
   const [toast, setToast] = useState<string | null>(null);
   const [rematchBusy, setRematchBusy] = useState(false);
   const [rematchError, setRematchError] = useState<string | null>(null);
-  const callouts = useCallouts();
+  const [beat, setBeat] = useState<Beat>({ id: 0, events: [], fresh: true });
+  const beatId = useRef(0);
   const authLost = useRef(onAuthLost);
   authLost.current = onAuthLost;
+  const session = useOptionalSession();
+  const [nextFixture, setNextFixture] = useState<Fixture | null>(null);
+  const [nextBusy, setNextBusy] = useState(false);
+  const [nextError, setNextError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -68,7 +82,7 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
           setJoin({
             kind: 'error',
             title: 'That table is full',
-            detail: 'Two players are already seated in this game. Ask for a fresh invite link.',
+            detail: 'Every seat in this game is already taken. Ask for a fresh invite link.',
             retry: false,
           });
         else setJoin({ kind: 'error', title: 'Couldn’t join the game', detail: errorMessage(e), retry: true });
@@ -93,7 +107,6 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
     return () => clearTimeout(t);
   }, [pending]);
 
-  const pushCallouts = callouts.push;
   const sock = useGameSocket({
     code,
     token,
@@ -101,12 +114,8 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
     onState: (m, fresh) => {
       setMsg(m);
       setPending(false);
-      if (!fresh && m.events.length) {
-        const you = m.you;
-        const names: [string, string] = [m.players[0]?.name ?? 'Opponent', m.players[1]?.name ?? 'Opponent'];
-        names[you] = m.players[you]?.name ?? profile.name;
-        pushCallouts(describeEvents(m.events, you, names));
-      }
+      // Each message's events are a beat for the table's choreography.
+      setBeat({ id: ++beatId.current, events: m.events, fresh });
     },
     onError: (message) => {
       setPending(false);
@@ -139,6 +148,34 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
     }
   }, [msg?.next, token, code]);
 
+  // Finishing a game offers you the next one in your queue.
+  const finished = msg?.status === 'finished';
+  useEffect(() => {
+    if (!finished) return;
+    let alive = true;
+    api.nextFixture(token).then(
+      (r) => alive && setNextFixture(r.fixture),
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [finished, token]);
+
+  const goNext = useCallback(async () => {
+    if (!nextFixture) return;
+    setNextBusy(true);
+    setNextError(null);
+    try {
+      const r = await api.startFixture(token, nextFixture.id);
+      navigate(`/g/${r.code}`);
+    } catch (e) {
+      if (errorStatus(e) === 401) authLost.current();
+      setNextError(errorMessage(e));
+      setNextBusy(false);
+    }
+  }, [nextFixture, token]);
+
   if (join.kind === 'joining') return <Notice code={code} title="Pulling up a chair…" />;
   if (join.kind === 'error')
     return (
@@ -160,13 +197,24 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
       </div>
     );
 
-  const you = msg.you;
-  const opp = other(you);
-  const names: [string, string] = ['', ''];
-  names[you] = msg.players[you]?.name ?? profile.name;
-  names[opp] = msg.players[opp]?.name ?? 'Opponent';
+  const names = seatNames(msg, profile.name);
+  const emojis = msg.players.map((p) => (p ? session?.members.get(p.id)?.avatar?.emoji ?? null : null));
 
-  if (!msg.view) return <Waiting code={msg.code} myName={names[you]} status={sock.status} />;
+  // Removed from (or left) a waiting game: the server hung up on purpose.
+  if (sock.fatal && !msg.view) return <Notice code={code} title={sock.fatal} detail="You can still find your other games on your home screen." />;
+
+  if (!msg.view)
+    return (
+      <Waiting
+        msg={msg}
+        names={names}
+        profile={profile}
+        status={sock.status}
+        onError={showToast}
+        toast={toast}
+        onAuthLost={() => authLost.current()}
+      />
+    );
 
   return (
     <Table
@@ -176,10 +224,11 @@ export function Game({ code, profile, onAuthLost }: { code: string; profile: Pro
       status={sock.fatal ? 'failed' : sock.status}
       pending={pending}
       act={act}
-      callouts={callouts.active}
-      log={callouts.log}
+      beat={beat}
       toast={toast ?? (sock.fatal ? sock.fatal : null)}
       rematch={{ busy: rematchBusy, error: rematchError, go: goRematch }}
+      emojis={emojis}
+      next={nextFixture ? { label: nextLabel(nextFixture, profile.id), busy: nextBusy, error: nextError, go: goNext } : null}
     />
   );
 }

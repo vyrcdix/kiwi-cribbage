@@ -1,282 +1,560 @@
-import { type ReactElement, useEffect, useState } from 'react';
-import { type Card, value } from '../../shared/cards';
-import { type Action, type PlayerView, type Seat, other } from '../../shared/game';
-import { CardView } from '../cards/CardView';
+// The table (handoff Table.jsx). Six fixed zones, top to bottom, the same in every
+// phase so nothing jumps:
+//   opponent strip(s) 56 / board 156 / table top (flex) / prompt 48 / hand 92 / your strip 52
+// Only the stage inside the table top, and what the prompt and hand zones hold,
+// change with the phase. At 960 px and over the same zones open sideways: players
+// and the running tally in a left rail, board and table in the middle, the hand's
+// log on the right.
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type Card, RANKS, rank, value } from '../../shared/cards';
+import {
+  type Action, type PlayerView, type Seat, discardCount, leftOf, showSeat, teamOf,
+} from '../../shared/game';
 import { cardText, possessive } from '../lib/format';
 import type { ConnStatus, StateMsg } from '../lib/useGameSocket';
-import type { Line } from './callouts';
-import { GameOver } from './GameOver';
-import { ScoreTrack } from './ScoreTrack';
-import { ShowPanel } from './ShowPanel';
-import { TopBar } from './TopBar';
+import { Board } from './Board';
+import { type LogEntry, describeEvents, logEntries, showLines } from './callouts';
+import { type Beat, stageOf, useDirector } from './director';
+import { Flights, fly } from './Flights';
+import { haptic } from './haptics';
+import { CSS_EASE, DUR, reducedMotion, rememberRect, skipAnimations } from './motion';
+import { pegDisplay } from './pegging';
+import { PlayerStrip } from './PlayerStrip';
+import {
+  compactStatus, cribLabel, discardPrompt, listNames, othersClockwise, overCopy, relationOf, showStepLabels, statusLine,
+  teamName, teamsInOrder, toneOf, toneOfSeat, waitingText,
+} from './seating';
+import { CutStage, DealStage, OverStage, PeggingStage, ShowStage, Tally, type TallyColumn, TopRow } from './stages';
+import { CardView } from '../cards/CardView';
+import { navigate } from '../lib/router';
 
 interface Props {
   msg: StateMsg;
   view: PlayerView;
-  names: [string, string];
+  names: string[];
   status: ConnStatus;
   pending: boolean;
   act: (a: Action) => void;
-  callouts: Line[];
-  log: Line[];
+  beat: Beat;
   toast: string | null;
   rematch: { busy: boolean; error: string | null; go: () => void };
+  /** By seat: each player's league avatar emoji, if they have one. */
+  emojis?: (string | null)[];
+  /** Your next queued fixture, offered at game over ("finishing a game offers you the next"). */
+  next?: { label: string; busy: boolean; error: string | null; go: () => void } | null;
 }
 
-const seatClass = (seat: Seat | null, you: Seat) => (seat === null ? '' : seat === you ? 'is-you' : 'is-opp');
+/** The show's steps: cards slide in, each combination 450 ms, the total holds 400 ms. */
+function useShowSequence(key: string | null, count: number, running: boolean, is29: boolean, onDone: () => void) {
+  const [st, setSt] = useState({ key, i: -1, nine: false });
+  if (st.key !== key) setSt({ key, i: -1, nine: false });
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const done = useRef(onDone);
+  done.current = onDone;
+  const nineRef = useRef(false);
 
-function PlayerBar({
-  name, seat, view, online, active, isYou,
-}: { name: string; seat: Seat; view: PlayerView; online?: boolean; active: boolean; isYou: boolean }) {
-  const dealer = view.dealer === seat;
-  return (
-    <div className={`player ${isYou ? 'player--you is-you' : 'player--opp is-opp'}${active ? ' is-active' : ''}`}>
-      <span className="player__peg" aria-hidden="true" />
-      <span className="player__name">
-        <span className="player__label">{name}</span>
-        {!isYou && (
-          <span className={`presence ${online ? 'is-online' : 'is-offline'}`} title={online ? 'Online' : 'Offline'}>
-            <span className="sr-only">{online ? 'online' : 'offline'}</span>
-          </span>
-        )}
-      </span>
-      {dealer && <span className="chip chip--dealer" title="Dealer: the crib is theirs">Dealer</span>}
-      {active && <span className="player__turn">{isYou ? 'your turn' : 'thinking…'}</span>}
-      <span className="player__score" aria-label={`${view.scores[seat]} points`}>{view.scores[seat]}</span>
-    </div>
-  );
+  useEffect(() => {
+    if (!running) return;
+    const at = (ms: number, f: () => void) => timers.current.push(setTimeout(f, ms));
+    setSt({ key, i: -1, nine: false });
+    nineRef.current = false;
+    const enter = reducedMotion() ? DUR.reduced : 260;
+    const steps = Math.max(1, count);
+    for (let k = 0; k < steps; k++) at(enter + k * DUR.showStep, () => setSt((s) => ({ ...s, i: k })));
+    const end = enter + steps * DUR.showStep;
+    if (is29) {
+      // On his nobs: the rim turns butter, the cards fan out, "29" holds 1.6 s and cannot be skipped.
+      at(end, () => {
+        nineRef.current = true;
+        setSt((s) => ({ ...s, nine: true }));
+      });
+      at(end + 300 + 1600, () => {
+        nineRef.current = false;
+        setSt((s) => ({ ...s, i: count, nine: false }));
+        done.current();
+      });
+    } else {
+      at(end + DUR.showHold, () => {
+        setSt((s) => ({ ...s, i: count }));
+        done.current();
+      });
+    }
+    return () => {
+      timers.current.forEach(clearTimeout);
+      timers.current = [];
+    };
+  }, [running, key, count, is29]);
+
+  const jump = useCallback(() => {
+    if (nineRef.current) return false;
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+    setSt((s) => ({ ...s, i: count, nine: false }));
+    done.current();
+    return true;
+  }, [count]);
+
+  return { current: running ? st.i : count, nine: running && st.nine, jump };
 }
 
-function PlayedRow({ view }: { view: PlayerView }) {
-  const firstLive = view.played.length - view.pile.length;
-  return (
-    <ol className="played" aria-label="Cards played this hand">
-      {view.played.map((p, i) => {
-        const mine = p.seat === view.you;
-        const live = i >= firstLive;
-        return (
-          <li key={p.card} className={`played__card ${mine ? 'is-you' : 'is-opp'}${live ? ' is-live' : ' is-old'}`}>
-            <CardView card={p.card} dimmed={!live} label={`${mine ? 'You' : 'Opponent'}: ${cardText(p.card)}`} />
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
+const cribRect = (): DOMRect | null => {
+  const pile = document.querySelector('[data-zone="crib"]');
+  if (!pile) return null;
+  const r = pile.getBoundingClientRect();
+  const first = pile.firstElementChild?.getBoundingClientRect();
+  const w = first?.width || 44;
+  const h = first?.height || w * 1.4;
+  return new DOMRect(r.right - w, r.top, w, h);
+};
 
-export function Table({ msg, view, names, status, pending, act, callouts, log, toast, rematch }: Props) {
+export function Table({ msg, view, names, status, pending, act, beat, toast, rematch, emojis, next }: Props) {
   const you = view.you;
-  const opp = other(you);
-  const oppName = names[opp];
-  const youDeal = view.dealer === you;
-  const cribName = youDeal ? 'your crib' : `${possessive(oppName)} crib`;
-  const [selected, setSelected] = useState<Card[]>([]);
+  const n = view.players;
+  const mine = teamOf(n, you);
+  const others = othersClockwise(n, you);
+  const cutter = leftOf(n, view.dealer);
+  const need = discardCount(n);
+  const tableRef = useRef<HTMLElement>(null);
+  const ctx = useMemo(() => ({ you, names }), [you, names]);
+  const { dir, seated, showDone } = useDirector(view, beat, ctx);
+  const stage = dir.stage ?? stageOf(view.phase);
 
-  // A new deal or phase clears any half-made selection.
+  // ---- scores in the strips update as the peg seats ----
+  const [shown, setShown] = useState<number[]>(() => [...view.scores]);
+  useEffect(() => {
+    if (beat.fresh) setShown([...view.scores]);
+  }, [beat.id]);
+  useEffect(() => {
+    if (dir.board) return;
+    const t = setTimeout(() => setShown([...view.scores]), 1600);
+    return () => clearTimeout(t);
+  }, [dir.board, view.scores]);
+  const onSeated = useCallback((team: number, score: number) => {
+    setShown((s) => {
+      const x = [...s];
+      x[team] = score;
+      return x;
+    });
+    if (team === mine) haptic('light');
+    seated();
+  }, [mine, seated]);
+  const boardScores = dir.board?.scores ?? view.scores;
+  const boardBack = dir.board?.back ?? view.back;
+
+  // ---- discard: pick, send, and the cards' trip to the crib ----
+  const [selected, setSelected] = useState<Card[]>([]);
+  const [sent, setSent] = useState<{ hand: number; cards: Card[]; down: boolean } | null>(null);
+  const [flying, setFlying] = useState(0);
   useEffect(() => setSelected([]), [view.handNo, view.phase]);
   const sel = selected.filter((c) => view.hand.includes(c));
+  const sentNow = sent && sent.hand === view.handNo ? sent : null;
+  const iDiscarded = view.discarded[you];
 
-  const toggle = (c: Card) =>
+  useEffect(() => {
+    if (!pending && sent && !iDiscarded && view.phase === 'discard') setSent(null); // refused: put them back
+  }, [pending, sent, iDiscarded, view.phase]);
+  useEffect(() => {
+    if (!sentNow || !iDiscarded) return;
+    if (reducedMotion()) {
+      setSent(null);
+      return;
+    }
+    let t2: ReturnType<typeof setTimeout>;
+    const t1 = setTimeout(() => {
+      setSent((s) => (s ? { ...s, down: true } : s));
+      t2 = setTimeout(() => {
+        const to = cribRect();
+        const slots = [...document.querySelectorAll('.stage .slot')];
+        let launched = 0;
+        sentNow.cards.forEach((_, i) => {
+          const from = slots[i]?.firstElementChild?.getBoundingClientRect();
+          if (to && from && fly({ card: null, from, to, delay: i * 80, duration: 260, easing: CSS_EASE.inOut, onLand: () => setFlying((f) => Math.max(0, f - 1)) })) launched++;
+        });
+        setFlying((f) => f + launched);
+        setSent(null);
+      }, DUR.flip);
+    }, 180);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [sentNow?.cards.join(','), iDiscarded]);
+
+  const toggle = (c: Card) => {
+    haptic('light');
     setSelected((s0) => {
       const s = s0.filter((x) => view.hand.includes(x));
       if (s.includes(c)) return s.filter((x) => x !== c);
-      return s.length < 2 ? [...s, c] : [s[1], c];
+      return s.length < need ? [...s, c] : [...s.slice(1), c];
     });
+  };
+  const send = () => {
+    for (const c of sel) rememberRect(`disc:${c}`, document.querySelector(`[data-card="${c}"] .card`));
+    setSent({ hand: view.handNo, cards: sel, down: false });
+    act({ t: 'discard', cards: sel });
+  };
 
-  const phase = view.phase;
-  const iDiscarded = view.discarded[you];
-  const myTurn = phase === 'peg' && view.turn === you;
-  const iCut = phase === 'cut' && !youDeal;
+  // ---- events that move things: the deal, others' discards, your own lay ----
+  const justPlayed = useMemo(
+    () => new Set(beat.fresh ? [] : beat.events.flatMap((e) => (e.t === 'play' ? [e.card] : []))),
+    [beat],
+  );
+  const handled = useRef(beat.id);
+  useLayoutEffect(() => {
+    if (beat.fresh || handled.current === beat.id) return;
+    handled.current = beat.id;
+    const table = tableRef.current;
+    for (const e of beat.events) if (e.t === 'play' && e.seat === you) haptic('light');
 
-  // ---- the hand ----
-  let handCards: ReactElement[] = [];
-  if (phase === 'discard' && !iDiscarded) {
-    handCards = view.hand.map((c) => (
-      <CardView key={c} card={c} selected={sel.includes(c)} onClick={() => toggle(c)} disabled={pending} />
-    ));
-  } else if (myTurn) {
-    handCards = view.hand.map((c) => {
-      const legal = view.count + value(c) <= 31;
-      return legal ? (
-        <CardView key={c} card={c} onClick={() => act({ t: 'play', card: c })} disabled={pending} className="is-playable" />
-      ) : (
-        <CardView key={c} card={c} dimmed label={`${cardText(c)} (would go over 31)`} />
-      );
-    });
-  } else {
-    handCards = view.hand.map((c) => <CardView key={c} card={c} />);
-  }
-
-  // ---- the action line ----
-  let action: ReactElement | null = null;
-  if (phase === 'discard') {
-    if (!iDiscarded) {
-      const need = 2 - sel.length;
-      action = (
-        <button
-          type="button"
-          className="btn btn--primary btn--wide"
-          disabled={need > 0 || pending}
-          onClick={() => act({ t: 'discard', cards: [sel[0], sel[1]] })}
-        >
-          {need === 2 ? `Choose two cards for ${cribName}` : need === 1 ? 'Choose one more card' : `Send to ${cribName}`}
-        </button>
-      );
-    } else {
-      action = <p className="status">{view.discarded[opp] ? 'Cutting the deck…' : `Waiting for ${oppName}…`}</p>;
+    // Others' discards slide from their strip to the crib.
+    const to = cribRect();
+    let launched = 0;
+    for (const e of beat.events) {
+      if (e.t !== 'discard' || e.seat === you || !to) continue;
+      const from = document.querySelector(`[data-held-seat="${e.seat}"]`)?.getBoundingClientRect();
+      if (!from) continue;
+      const w = to.width;
+      const src = new DOMRect(from.left, from.top, w * 0.5, w * 0.7);
+      for (let k = 0; k < need; k++) {
+        if (fly({ card: null, from: src, to, delay: k * 80, duration: 260, easing: CSS_EASE.inOut, onLand: () => setFlying((f) => Math.max(0, f - 1)) })) launched++;
+      }
     }
-  } else if (phase === 'cut') {
-    action = iCut ? (
-      <button type="button" className="btn btn--primary btn--wide" disabled={pending} onClick={() => act({ t: 'cut' })}>
-        Cut the deck
-      </button>
-    ) : (
-      <p className="status">{oppName} is cutting…</p>
-    );
-  } else if (phase === 'peg') {
-    action = myTurn ? (
-      <p className="status status--you">Your turn: tap a card to play</p>
-    ) : (
-      <p className="status">{oppName}’s turn…</p>
-    );
-  } else if (phase === 'show') {
-    action = view.acks[you] ? (
-      <p className="status">
-        Waiting for {oppName}
-        {msg.online[opp] ? '…' : ' (offline)…'}
-      </p>
-    ) : (
-      <button type="button" className="btn btn--primary btn--wide" disabled={pending} onClick={() => act({ t: 'ack' })}>
-        {view.showStep === 2 ? 'Next deal' : 'Continue'}
-        {view.acks[opp] && <span className="btn__note">{oppName} is ready</span>}
-      </button>
-    );
-  }
+    if (launched) setFlying((f) => f + launched);
 
-  // ---- the middle of the table ----
-  const deckButton = iCut ? (
-    <button type="button" className="deck deck--cut" onClick={() => act({ t: 'cut' })} disabled={pending} aria-label="Cut the deck">
-      <span className="deck__stack" aria-hidden="true">
-        <CardView card={null} />
-        <CardView card={null} />
-        <CardView card={null} />
-      </span>
-      <span className="deck__caption">Tap to cut</span>
-    </button>
-  ) : (
-    <div className="deck">
-      <span className="deck__stack">
-        <CardView card={null} />
-        <CardView card={null} />
-        {view.starter !== null ? <CardView card={view.starter} className="deck__starter" /> : <CardView card={null} />}
-      </span>
-      <span className="deck__caption">{view.starter !== null ? 'Starter' : 'Deck'}</span>
-    </div>
+    // The deal: cards leave the deck one at a time, opponent first, 60 ms apart.
+    const deal = beat.events.find((e) => e.t === 'deal');
+    const deck = document.querySelector('[data-zone="deck"] .card')?.getBoundingClientRect();
+    if (!deal || !table || !deck || reducedMotion()) return;
+    table.querySelectorAll('[data-landed]').forEach((el) => el.removeAttribute('data-landed'));
+    const handEls = [...table.querySelectorAll<HTMLElement>('.table__hand .hand-card')];
+    let release!: () => void;
+    const released = new Promise<void>((r) => { release = r; });
+    let mineLeft = handEls.length;
+    const finish = () => {
+      table.classList.add('is-flipping');
+      table.classList.remove('is-dealing');
+      release();
+      setTimeout(() => table.classList.remove('is-flipping'), DUR.flip + 40);
+    };
+    table.classList.add('is-dealing');
+    const size = Math.max(...view.handCounts, view.hand.length);
+    let i = 0;
+    for (let round = 0; round < size; round++) {
+      for (let k = 0; k < n; k++) {
+        const seat = (view.dealer + 1 + k) % n;
+        const target = seat === you
+          ? handEls[round]?.querySelector('.card')
+          : table.querySelector(`[data-held-seat="${seat}"] > span:nth-child(${round + 1})`);
+        const rect = target?.getBoundingClientRect();
+        if (!target || !rect) continue;
+        const holder = seat === you ? handEls[round] : (target as HTMLElement);
+        const ok = fly({
+          card: null, from: deck, to: rect, delay: i * 60, duration: DUR.card,
+          release: seat === you ? released : undefined,
+          onLand: () => {
+            holder.setAttribute('data-landed', '');
+            if (seat === you && --mineLeft === 0) setTimeout(finish, 60);
+          },
+        });
+        if (!ok) holder.setAttribute('data-landed', '');
+        else i++;
+        if (!ok && seat === you && --mineLeft === 0) finish();
+      }
+    }
+    if (handEls.length === 0) finish();
+    // Never leave the hand hidden.
+    setTimeout(() => {
+      if (table.classList.contains('is-dealing')) finish();
+    }, i * 60 + 1500);
+  }, [beat, you, n, need, view]);
+
+  // A tap anywhere skips running animations to their end state.
+  useEffect(() => {
+    const onDown = () => skipAnimations();
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, []);
+
+  // ---- the show ----
+  const result = view.showResult;
+  const showKey = result && (view.phase === 'show' || view.phase === 'over') ? `${view.handNo}-${view.showStep}` : null;
+  const lines = useMemo(() => (result ? showLines(result) : []), [result]);
+  const is29 = result?.total === 29;
+  const seq = useShowSequence(showKey, lines.length, dir.showRun !== null && dir.showRun === showKey, is29, showDone);
+  const showTitle = result ? `${result.seat === you ? 'Your' : possessive(names[result.seat])} ${result.crib ? 'crib' : 'hand'}` : '';
+  const runningTotal = seq.current >= lines.length ? result?.total ?? 0 : seq.current >= 0 ? lines[seq.current].running : 0;
+
+  // Spoken announcements for screen readers (the starter, a go, a new deal, the win).
+  const spoken = useMemo(
+    () => (beat.fresh ? '' : describeEvents(beat.events, you, names, n).filter((d) => d.big).map((d) => d.text).join('. ')),
+    [beat, you, names, n],
   );
 
-  const crib = (
-    <div className={`crib ${youDeal ? 'is-you' : 'is-opp'}`}>
-      <span className="crib__stack" aria-hidden="true">
-        {view.cribCount === 0 ? (
-          <span className="crib__empty" />
-        ) : (
-          Array.from({ length: Math.min(view.cribCount, 4) }, (_, i) => <CardView key={i} card={null} />)
-        )}
-      </span>
-      <span className="crib__caption">{youDeal ? 'Your crib' : `${possessive(oppName)} crib`}</span>
-    </div>
-  );
+  // ---- the hand log (laptop) ----
+  const [log, setLog] = useState<LogEntry[]>([]);
+  const logId = useRef(1);
+  const logged = useRef(beat.id);
+  useEffect(() => {
+    if (logged.current === beat.id) return;
+    logged.current = beat.id;
+    if (beat.fresh || !beat.events.length) return;
+    const { reset, rows } = logEntries(beat.events, you, names, n, () => logId.current++);
+    setLog((l) => (reset ? rows : [...l, ...rows]).slice(-40));
+  }, [beat, you, names, n]);
 
-  let middle: ReactElement;
-  if (phase === 'show' && view.showResult) {
-    middle = <ShowPanel key={`${view.handNo}-${view.showStep}`} view={view} names={names} />;
-  } else if (phase === 'over') {
-    middle = (
-      <GameOver view={view} names={names} next={msg.next} busy={rematch.busy} error={rematch.error} onRematch={rematch.go} />
-    );
-  } else {
-    middle = (
-      <>
-        <div className="felt__top">
-          {deckButton}
-          {crib}
-          {phase === 'peg' && (
-            <div className="count" aria-live="polite">
-              <span className="count__label">Count</span>
-              <span className="count__value" key={view.count}>{view.count}</span>
-            </div>
-          )}
-        </div>
-        {phase === 'peg' && <PlayedRow view={view} />}
-        {phase === 'discard' && view.handNo === 1 && (
-          <p className="felt__note">
-            Cut for deal: you {cardText(view.firstCut[you])}, {oppName} {cardText(view.firstCut[opp])}.{' '}
-            {youDeal ? 'Low card — you deal first.' : `Low card — ${oppName} deals first.`}
-          </p>
-        )}
-      </>
-    );
+  // ---- game over: haptics as the result lands ----
+  const overSeen = useRef(view.phase === 'over');
+  const copy = view.phase === 'over' && view.winner !== null ? overCopy(view, names) : null;
+  const won = copy?.won ?? false;
+  const skunkLevel = copy?.skunk ?? 0;
+  useEffect(() => {
+    if (stage !== 'over' || overSeen.current) return;
+    overSeen.current = true;
+    if (won) haptic('heavy');
+    // The plate stamps after the plinth rises and the kiwi drops: heavy, both players.
+    if (skunkLevel > 0) setTimeout(() => haptic('heavy'), 220 + 500 + 140);
+  }, [stage, won, skunkLevel]);
+
+  // ---- the prompt: one line saying what to do now, and at most one button ----
+  const myTurn = view.phase === 'peg' && view.turn === you;
+  const iCut = view.phase === 'cut' && cutter === you;
+  const unplayable = myTurn ? view.hand.filter((c) => view.count + value(c) > 31) : [];
+  let text = '';
+  let button: { label: string; onPress: () => void; disabled?: boolean } | null = null;
+  const waiting = waitingText(view, names, msg.online);
+  if (view.phase === 'discard') {
+    if (!iDiscarded && !sentNow) {
+      text = discardPrompt(n, names, you, view.dealer, sel.length);
+      button = { label: 'Send', onPress: send, disabled: sel.length !== need || pending };
+    } else text = waiting;
+  } else if (view.phase === 'cut') {
+    text = iCut ? 'Tap the deck to cut' : waiting;
+  } else if (view.phase === 'peg') {
+    if (myTurn) {
+      text = unplayable.length
+        ? `Your turn. ${listNames([...new Set(unplayable.map((c) => RANKS[rank(c)]))])} would go past 31.`
+        : 'Your turn: lay a card';
+    } else text = waiting;
+  } else if (view.phase === 'show' || stage === 'show') {
+    const counting = seq.current < lines.length;
+    text = counting ? `${showTitle} · ${runningTotal}` : `${showTitle}: ${result?.total === 0 ? 'nineteen' : result?.total ?? 0}`;
+    if (view.phase === 'show') {
+      if (view.acks[you] && !counting) text = waiting;
+      else if (!view.acks[you]) {
+        button = {
+          label: view.showStep === n ? 'Next deal' : 'Continue',
+          disabled: pending,
+          onPress: () => {
+            seq.jump();
+            showDone();
+            act({ t: 'ack' });
+          },
+        };
+      }
+    }
   }
+  // The 29's hold cannot be skipped: Continue stays in place but waits.
+  if (stage === 'show' && seq.nine && button) button = { ...button, disabled: true };
+  const promptText = toast ?? dir.call ?? text;
+  const promptKind = toast ? 'error' : dir.call ? (dir.callScores ? 'call' : 'note') : 'plain';
 
-  const handHidden = phase === 'show' || phase === 'over';
+  // ---- strips ----
+  const lanes = useMemo(() => {
+    const order = teamsInOrder(n, you);
+    return [...order.slice(1), order[0]].map((team) => ({ team, tone: toneOf(n, you, team), name: teamName(n, names, you, team) }));
+  }, [n, you, names]);
+  const busySeat = (s: Seat) => (view.phase === 'peg' && view.turn === s) || (view.phase === 'cut' && cutter === s);
+  const compact = n > 2;
+  const connText = status === 'open' ? null : status === 'failed' ? 'Disconnected' : 'Reconnecting…';
+
+  // ---- hand zone ----
+  const handCards = sentNow ? view.hand.filter((c) => !sentNow.cards.includes(c)) : view.hand;
+  const play = (c: Card) => {
+    rememberRect(`card:${c}`, document.querySelector(`[data-card="${c}"] .card`));
+    act({ t: 'play', card: c });
+  };
+
+  const cribShown = Math.max(0, view.cribCount - (sentNow && iDiscarded ? sentNow.cards.length : 0) - flying);
+  const pegShown = pegDisplay(view, dir.frozen);
+  const tallyColumns: TallyColumn[] = [you, ...others].map((s) => ({ seat: s, label: s === you ? 'You' : names[s], tone: toneOfSeat(n, you, s) }));
+  const firstCutNote = view.handNo === 1 && view.firstCut.length === n
+    ? `Cut for deal: ${listNames(view.firstCut.map((c, s) => `${s === you ? 'you' : names[s]} ${cardText(c)}`))}. Low card deals.`
+    : null;
 
   return (
-    <div className="page page--game">
-      <TopBar status={status} code={msg.code} hand={view.handNo} />
-      <main className={`table phase-${phase}`}>
-        <section className="opp" aria-label={`${oppName}`}>
-          <PlayerBar
-            name={oppName}
-            seat={opp}
-            view={view}
-            online={msg.online[opp]}
-            isYou={false}
-            active={(phase === 'peg' && view.turn === opp) || (phase === 'cut' && youDeal)}
+    <main
+      ref={tableRef}
+      className="table"
+      data-phase={stage}
+      data-players={n}
+      style={{ '--opps': others.length } as CSSProperties}
+    >
+      <div className={`table__opps${compact ? ' table__opps--compact' : ''}`} data-count={others.length}>
+        {others.map((s) => (
+          <PlayerStrip
+            key={s}
+            who="opp"
+            seat={s}
+            name={names[s]}
+            tone={toneOfSeat(n, you, s)}
+            score={shown[teamOf(n, s)] ?? 0}
+            status={compact ? compactStatus(view, s, msg.online, shown) : statusLine(view, s, msg.online, shown)}
+            held={view.handCounts[s]}
+            dealer={view.dealer === s}
+            partner={relationOf(n, you, s) === 'partner'}
+            active={busySeat(s)}
+            compact={compact}
+            emoji={emojis?.[s]}
           />
-          <div className="opp__hand" aria-label={`${oppName} holds ${view.oppHandCount} cards`}>
-            {Array.from({ length: view.oppHandCount }, (_, i) => (
-              <CardView key={i} card={null} />
-            ))}
-          </div>
-        </section>
+        ))}
+      </div>
 
-        <ScoreTrack target={view.target} you={you} scores={view.scores} back={view.back} names={names} />
+      <div className="table__board">
+        <Board lanes={lanes} scores={boardScores} back={boardBack} onSeated={onSeated} finishLit={dir.finishLit || stage === 'over'} />
+      </div>
 
-        <section className={`felt${phase === 'show' || phase === 'over' ? ' felt--panel' : ''}`}>{middle}</section>
-
-        {/* Over the opponent's corner: never hides the cards in play or anything tappable. */}
-        <div className="callouts" aria-live="assertive">
-          {callouts.map((c) => (
-            <p key={c.id} className={`callout ${seatClass(c.seat, you)}`}>
-              {c.text}
-            </p>
-          ))}
+      <section className="table__top" aria-label="Table" data-rim={is29 && stage === 'show' && (seq.nine || seq.current >= lines.length) ? 'butter' : undefined}>
+        {stage !== 'over' && !seq.nine && (
+          <TopRow
+            deckAway={stage === 'cut'}
+            starter={stage === 'cut' ? null : view.starter}
+            starterAway={stage === 'show'}
+            cribCount={cribShown}
+            cribLabel={cribLabel(n, names, you, view.dealer)}
+            lit={dir.lit}
+          />
+        )}
+        <div className="stage" key={stage}>
+          {stage === 'deal' && (
+            <DealStage slots={need} sent={sentNow && (iDiscarded || pending) ? sentNow : null} note={firstCutNote} />
+          )}
+          {stage === 'cut' && (
+            <CutStage
+              canCut={iCut && !pending}
+              revealed={dir.cutReveal}
+              starter={view.starter}
+              lit={view.starter !== null && dir.lit.includes(view.starter)}
+              onCut={() => {
+                haptic('light');
+                act({ t: 'cut' });
+              }}
+            />
+          )}
+          {stage === 'pegging' && (
+            <PeggingStage display={pegShown} view={view} names={names} lit={dir.lit} justPlayed={justPlayed} />
+          )}
+          {stage === 'show' && result && view.starter !== null && (
+            <ShowStage
+              cards={result.cards}
+              crib={result.crib}
+              starter={view.starter}
+              lines={lines}
+              current={seq.current}
+              running={dir.showRun === showKey && seq.current < lines.length}
+              twentyNine={seq.nine}
+            />
+          )}
+          {stage === 'over' && copy && (
+            <OverStage headline={copy.headline} detail={copy.detail} skunk={copy.skunk} plate={copy.plate}>
+              <Tally columns={tallyColumns} stats={view.stats} best />
+              {msg.next && <p className="over__note">A rematch is ready.</p>}
+              {rematch.error && <p className="over__note over__note--error" role="alert">{rematch.error}</p>}
+              {next?.error && <p className="over__note over__note--error" role="alert">{next.error}</p>}
+            </OverStage>
+          )}
         </div>
+      </section>
 
-        {log.length > 0 && (
-          <ol className="log" aria-label="Recent plays">
-            {log.slice(0, 3).map((l) => (
-              <li key={l.id} className={seatClass(l.seat, you)}>
-                {l.text}
-              </li>
-            ))}
+      <div className="table__prompt">
+        {stage === 'over' && next ? (
+          <button type="button" className="btn btn--wide" onClick={next.go} disabled={next.busy}>
+            {next.busy ? 'Dealing…' : next.label}
+          </button>
+        ) : stage === 'over' ? (
+          <button type="button" className="btn btn--wide" onClick={rematch.go} disabled={rematch.busy}>
+            {msg.next ? 'Join rematch' : rematch.busy ? 'Shuffling…' : 'Rematch'}
+          </button>
+        ) : (
+          <>
+            <p aria-live="polite" data-kind={promptKind} className={dir.call ? `tone-${dir.callTone ?? 0}` : undefined}>{promptText}</p>
+            {button && (
+              <button type="button" className="btn" onClick={button.onPress} disabled={button.disabled}>{button.label}</button>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="table__hand">
+        {stage === 'over' && next && (
+          <button type="button" className="btn btn--wide btn--quiet" onClick={rematch.go} disabled={rematch.busy}>
+            {msg.next ? 'Join rematch' : rematch.busy ? 'Shuffling…' : 'Rematch'}
+          </button>
+        )}
+        {stage === 'over' && (
+          <button type="button" className="btn btn--wide btn--quiet" onClick={() => navigate('/')}>Home</button>
+        )}
+        {stage === 'show' && (
+          <ol className="steps" style={{ '--steps': n + 1 } as CSSProperties}>
+            {showStepLabels(view, names).map((label, i) => {
+              const seat = i === n ? view.dealer : showSeat(n, view.dealer, i);
+              return (
+                <li key={i} className={`tone-${toneOfSeat(n, you, seat)}`} aria-current={i === view.showStep ? 'step' : undefined} data-done={i < view.showStep || undefined}>
+                  {label}
+                </li>
+              );
+            })}
           </ol>
         )}
+        {stage !== 'over' && stage !== 'show' && handCards.map((c) => {
+          const discarding = view.phase === 'discard' && !iDiscarded && !sentNow;
+          const legal = myTurn && view.count + value(c) <= 31;
+          const picked = discarding && sel.includes(c);
+          const dim = myTurn && !legal;
+          const enabled = (discarding || legal) && !pending;
+          return (
+            <button
+              key={c}
+              type="button"
+              className="hand-card"
+              data-card={c}
+              disabled={!enabled}
+              aria-pressed={discarding ? picked : undefined}
+              onClick={() => (discarding ? toggle(c) : play(c))}
+            >
+              <CardView card={c} fluid state={picked ? 'picked' : dim ? 'dim' : ''} label={dim ? `${cardText(c)} (would go past 31)` : undefined} />
+            </button>
+          );
+        })}
+      </div>
 
-        <section className="me" aria-label="You">
-          <PlayerBar name={names[you]} seat={you} view={view} isYou active={myTurn || iCut} />
-          {!handHidden && (
-            <div className={`hand${view.hand.length > 4 ? ' hand--crowded' : ''}${myTurn ? ' is-turn' : ''}`}>{handCards}</div>
-          )}
-          {action && <div className="actions">{action}</div>}
-        </section>
+      <PlayerStrip
+        who="you"
+        seat={you}
+        name={names[you]}
+        tone={0}
+        score={shown[mine] ?? 0}
+        status={connText ? <span className="conn" role="status">{status !== 'failed' && <span className="conn__spin" aria-hidden="true" />}{connText}</span> : statusLine(view, you, msg.online, shown)}
+        dealer={view.dealer === you}
+        active={myTurn || iCut}
+        emoji={emojis?.[you]}
+      />
 
-        {toast && (
-          <p className="toast" role="alert">
-            {toast}
-          </p>
-        )}
-      </main>
-    </div>
+      {/* Laptop only: the running tally in the left rail (at game over it carries the best hand too). */}
+      <div className="table__tally"><Tally columns={tallyColumns} stats={view.stats} best={stage === 'over'} /></div>
+      <aside className="log" aria-label="This hand">
+        <h2 className="eyebrow">This hand{view.handNo ? ` · deal ${view.handNo}` : ''} <span className="log__code">{msg.code}</span></h2>
+        <ol>
+          {[...log].reverse().map((e) => (
+            <li key={e.id} data-score={e.score || undefined} className={e.tone !== null ? `tone-${e.tone}` : undefined}>
+              <span>{e.text}</span>
+              <b>{e.value}</b>
+            </li>
+          ))}
+        </ol>
+      </aside>
+
+      <p className="sr-only" aria-live="polite">{spoken}</p>
+      <Flights />
+    </main>
   );
 }

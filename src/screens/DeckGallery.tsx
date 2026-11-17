@@ -1,30 +1,64 @@
-// /deck — every card of the current deck laid out, so a deck can be checked
-// (and admired) without waiting to be dealt the right cards.
-import { fullDeck } from '../../shared/cards';
+// /deck — every card of a deck laid out at the full face, so a deck can be checked
+// (and admired) without waiting to be dealt the right cards. Switch between the four
+// decks, and try four-colour suits.
+import { useContext, useState } from 'react';
+import { RANKS, SUIT_NAMES, card } from '../../shared/cards';
+import { Brand } from '../brand/Mark';
 import { CardView } from '../cards/CardView';
-import { DECKS, DEFAULT_DECK } from '../cards/decks';
+import { DECKS, DECK_ORDER, DEFAULT_DECK, DeckContext } from '../cards/decks';
+import { useFourColour } from '../cards/prefs';
 import { navigate } from '../lib/router';
 
 export function DeckGallery() {
-  const deck = DECKS[DEFAULT_DECK];
-  const cards = fullDeck();
-  const courts = cards.filter((c) => c % 13 >= 10).sort((a, b) => (b % 13) - (a % 13) || a - b);
-  const pips = cards.filter((c) => c % 13 < 10);
-  const grid = { display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center' } as const;
+  const yours = useContext(DeckContext);
+  const [deckId, setDeckId] = useState<string>(() => {
+    const q = new URLSearchParams(location.search).get('d');
+    return q && DECKS[q] ? q : DECKS[yours] ? yours : DEFAULT_DECK;
+  });
+  const [four, setFour] = useFourColour();
+  const deck = DECKS[deckId];
+  const pick = (id: string) => {
+    setDeckId(id);
+    history.replaceState(null, '', id === DEFAULT_DECK ? '/deck' : `/deck?d=${id}`);
+  };
+
   return (
-    <div className="page">
-      <main style={{ padding: '20px 16px 40px', maxWidth: 760, margin: '0 auto' }}>
-        <h1 className="brand" style={{ textAlign: 'center' }}>The {deck.name} deck</h1>
-        <section style={{ ...grid, ['--card-w' as string]: 'clamp(76px, 21vw, 150px)', margin: '20px 0' }}>
-          <CardView card={null} />
-          {courts.map((c) => <CardView key={c} card={c} />)}
-        </section>
-        <section style={{ ...grid, ['--card-w' as string]: 'clamp(48px, 13vw, 76px)', gap: 6 }}>
-          {pips.map((c) => <CardView key={c} card={c} />)}
-        </section>
-        <p style={{ textAlign: 'center', marginTop: 24 }}>
-          <button type="button" className="btn" onClick={() => navigate('/')}>Home</button>
-        </p>
+    <div className="page page--wide">
+      <main className="gallery">
+        <header className="gallery__head">
+          <button type="button" className="link" onClick={() => (history.length > 1 ? history.back() : navigate('/'))}>‹ Back</button>
+          <Brand size="small" />
+        </header>
+        <h1 className="gallery__title">The {deck.name} deck</h1>
+        <div className="segmented" role="radiogroup" aria-label="Deck">
+          {DECK_ORDER.map((id) => (
+            <button key={id} type="button" role="radio" aria-checked={id === deckId} className="segmented__opt" onClick={() => pick(id)}>
+              {DECKS[id].name}
+            </button>
+          ))}
+        </div>
+        <label className="switch switch--inline">
+          <input type="checkbox" checked={four} onChange={(e) => setFour(e.target.checked)} />
+          <span className="switch__track" aria-hidden="true" />
+          <span className="switch__text"><strong>Four-colour suits</strong></span>
+        </label>
+
+        <DeckContext.Provider value={deckId}>
+          <section className="gallery__group" aria-label="Back">
+            <h2 className="eyebrow">Back</h2>
+            <div className="gallery__grid">
+              <CardView card={null} fluid face="full" label={`${deck.name} back`} />
+            </div>
+          </section>
+          {[0, 1, 2, 3].map((s) => (
+            <section key={s} className="gallery__group" aria-label={SUIT_NAMES[s]}>
+              <h2 className="eyebrow">{SUIT_NAMES[s]}</h2>
+              <div className="gallery__grid">
+                {RANKS.map((_, r) => <CardView key={r} card={card(r, s)} fluid face="full" />)}
+              </div>
+            </section>
+          ))}
+        </DeckContext.Provider>
       </main>
     </div>
   );

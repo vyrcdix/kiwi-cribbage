@@ -1,197 +1,105 @@
-/* Cards. Everything scales from --card-w, set by the container. */
+/* Cards (handoff styles.css, "Card"). Everything scales from --w: set it on the
+   card (CardView's width prop does) or on an ancestor rule for fluid cards. */
+
 .card {
-  --w: var(--card-w, 64px);
+  --cw: var(--w, 56px);
   position: relative;
   flex: none;
-  display: block;
-  width: var(--w);
-  height: calc(var(--w) * 1.4);
-  padding: 0;
-  margin: 0;
-  border: 0;
-  border-radius: calc(var(--w) * 0.085);
-  font-family: var(--font-serif, Georgia, serif);
-  font-size: calc(var(--w) * 0.2);
-  line-height: 1;
-  color: var(--card-ink, #1f1b16);
-  background: var(--card-face, #fbf5e6);
-  box-shadow:
-    inset 0 0 0 1px rgba(60, 40, 20, 0.18),
-    0 1px 1px rgba(0, 0, 0, 0.3),
-    0 3px 8px rgba(0, 0, 0, 0.28);
+  box-sizing: border-box;
   overflow: hidden;
+  width: var(--cw);
+  height: calc(var(--cw) * 1.4); /* 5:7 */
+  border-radius: max(3px, calc(var(--cw) * var(--radius)));
+  background: var(--stock);
+  border: 1px solid var(--edge);
+  color: var(--ink);
+  font-family: var(--index-font);
+  box-shadow: 0 1px 0 rgba(31, 39, 35, 0.18), 0 2px 5px rgba(31, 39, 35, 0.12);
+  outline: 0 solid transparent;
+  outline-offset: 1px;
   user-select: none;
   -webkit-user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.25s ease, filter 0.25s ease;
+  transition: transform var(--dur-card) var(--ease-out), opacity var(--dur-card) linear;
+}
+.card[data-state='dim'] { opacity: 0.4; }
+.card[data-state='lit'] { transform: translateY(-6px); outline: 3px solid var(--c-butter); }
+.card[data-state='picked'] { transform: translateY(-14px); outline: 3px solid var(--c-green); }
+
+.card__index { position: absolute; display: flex; flex-direction: column; align-items: center; }
+.card__rank { font-weight: 800; line-height: 0.9; letter-spacing: -0.05em; white-space: nowrap; }
+
+.card--compact .card__index { left: calc(var(--cw) * 0.09); top: calc(var(--cw) * 0.09); gap: 1px; }
+.card--compact .card__rank { font-size: calc(var(--cw) * 0.4); }
+.card--compact .card__index-pip { width: calc(var(--cw) * 0.26); height: calc(var(--cw) * 0.26); }
+.card__big-pip {
+  position: absolute; right: calc(var(--cw) * 0.09); bottom: calc(var(--cw) * 0.09);
+  width: calc(var(--cw) * 0.46); height: calc(var(--cw) * 0.46);
+}
+.card__mini-slot {
+  position: absolute; right: calc(var(--cw) * 0.09); bottom: calc(var(--cw) * 0.09);
+  width: calc(var(--cw) * 0.46); height: calc(var(--cw) * 0.575); /* 4:5 */
+  box-sizing: border-box; border: 1px solid var(--ink); border-radius: 2px;
+  background: color-mix(in srgb, var(--ink) 15%, var(--stock)) center 35% / cover no-repeat;
 }
 
-button.card {
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-}
-button.card:disabled {
-  cursor: default;
-}
-button.card:focus-visible {
-  outline: 3px solid var(--brass-hi, #f0d58a);
-  outline-offset: 2px;
-}
-
-.card--red {
-  color: var(--card-red, #b3261e);
-}
-
-/* ---- Drawn face ---- */
-.card__corner {
-  position: absolute;
-  top: 0.32em;
-  left: 0.26em;
-  width: 1.15em;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.08em;
-}
-.card__corner--br {
-  top: auto;
-  left: auto;
-  bottom: 0.32em;
-  right: 0.26em;
-  transform: rotate(180deg);
-}
-.card__rank {
-  font-weight: 700;
-  font-size: 1.08em;
-  letter-spacing: -0.08em;
-  white-space: nowrap;
-}
+.card--full .card__index { left: calc(var(--cw) * 0.045); top: calc(var(--cw) * 0.045); width: calc(var(--cw) * 0.15); gap: 2px; }
+.card--full .card__index--foot { left: auto; top: auto; right: calc(var(--cw) * 0.045); bottom: calc(var(--cw) * 0.045); transform: rotate(180deg); }
+.card--full .card__rank { font-size: calc(var(--cw) * 0.16); }
+.card--full .card__index-pip { width: calc(var(--cw) * 0.11); height: calc(var(--cw) * 0.11); }
 .card__pip {
-  width: 0.78em;
-  height: 0.78em;
+  position: absolute; width: calc(var(--cw) * 0.2); height: calc(var(--cw) * 0.2);
+  transform: translate(-50%, -50%) rotate(var(--turn));
 }
-.card__center {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
+.card__pip--ace { width: calc(var(--cw) * 0.38); height: calc(var(--cw) * 0.38); }
+
+/* The court frame and photo slot: 4:5, 70% of the card's width, centred. */
+.card__slot {
+  position: absolute; left: 15%; top: 18.75%; width: 70%; height: 62.5%;
+  box-sizing: border-box; overflow: hidden;
+  border: 1.5px solid var(--ink); border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 12%, var(--stock));
 }
-.card__big {
-  width: 2.3em;
-  height: 2.3em;
+.card__slot[data-frame='double']::after {
+  content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  box-shadow: inset 0 0 0 3px var(--stock), inset 0 0 0 4px var(--ink);
 }
-.card__center--ace .card__big {
-  width: 3em;
-  height: 3em;
+.card__house-court {
+  height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  font-weight: 800; font-size: calc(var(--cw) * 0.42); line-height: 0.85;
 }
-.card__court {
-  position: absolute;
-  inset: 20% 22%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.1em;
-  border-radius: 0.25em;
-  border: 1px solid rgba(160, 120, 40, 0.55);
+.card__court-pip { width: calc(var(--cw) * 0.16); height: calc(var(--cw) * 0.16); }
+
+.card__photo { position: absolute; inset: 0; background: var(--stock); }
+.card__photo img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: 50% 35%; pointer-events: none; }
+/* Duotone fallback: greys multiply onto the stock, then the ink lifts the shadows. */
+.card__photo[data-treatment='duotone'] img { filter: grayscale(1) contrast(1.15); mix-blend-mode: multiply; }
+.card__photo[data-treatment='duotone']::before { content: ''; position: absolute; inset: 0; z-index: 1; background: var(--ink); mix-blend-mode: lighten; }
+/* Soft vignette at the frame, both treatments. */
+.card__photo::after {
+  content: ''; position: absolute; inset: 0; z-index: 2;
+  background: radial-gradient(ellipse at 50% 40%, transparent 55%, color-mix(in srgb, var(--ink) 35%, transparent) 100%);
+}
+
+.card__back {
+  --check-size: max(3px, calc(var(--cw) * 0.07));
+  --check-ink: color-mix(in srgb, var(--ink) 45%, transparent);
+  position: absolute; inset: max(2px, calc(var(--cw) * 0.06));
+  border: 1px solid var(--ink); border-radius: max(2px, calc(var(--cw) * var(--radius) * 0.6));
   background:
-    linear-gradient(180deg, rgba(201, 162, 74, 0.16), rgba(201, 162, 74, 0.04));
+    repeating-linear-gradient(0deg, var(--check-ink) 0 var(--check-size), transparent var(--check-size) calc(var(--check-size) * 2)),
+    repeating-linear-gradient(90deg, var(--check-ink) 0 var(--check-size), transparent var(--check-size) calc(var(--check-size) * 2)),
+    var(--stock);
 }
-.card__court-letter {
-  font-size: 2em;
-  font-weight: 700;
-  font-style: italic;
+/* A deck's back photo: full bleed inside the stock border. */
+.card__back[data-photo] { background: var(--back-photo) center / cover no-repeat, var(--stock); }
+.card__roundel {
+  position: absolute; left: 50%; top: 50%; width: 42%; aspect-ratio: 1; transform: translate(-50%, -50%);
+  box-sizing: border-box; display: grid; place-items: center;
+  border: 1.5px solid var(--ink); border-radius: 50%; background: var(--stock);
 }
-.card__court-suit {
-  width: 1.1em;
-  height: 1.1em;
-}
+.card__roundel svg { width: 70%; height: 70%; }
 
-/* ---- Photo faces (future decks) ---- */
-.card__photo {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  pointer-events: none;
-}
-
-/* ---- Back ---- */
-.card--back {
-  background: var(--card-face, #fbf5e6);
-}
-/* Thin cream border around a full-bleed photo, same rounding as the faces. */
-.card__frame {
-  position: absolute;
-  inset: max(2px, calc(var(--w) * 0.045));
-  border-radius: calc(var(--w) * 0.05);
-  overflow: hidden;
-  background: #7a2a1c;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
-}
-.card__frame .card__photo {
-  object-position: 50% 30%;
-}
-/* Photo court cards keep the picture's own framing, and carry their rank and
-   suit on cream chips so they read at a glance over any photo. */
-.card__frame--face .card__photo {
-  object-position: 50% 50%;
-}
-.card__corner--chip {
-  top: 0;
-  left: 0;
-  width: 1.3em;
-  padding: 0.26em 0 0.2em;
-  background: var(--card-face, #fbf5e6);
-  border-bottom-right-radius: 0.3em;
-  box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.25);
-}
-.card__corner--chip.card__corner--br {
-  top: auto;
-  left: auto;
-  bottom: 0;
-  right: 0;
-}
-/* Drawn fallback back: a brass lattice on oxblood. */
-.card__pattern {
-  position: absolute;
-  inset: max(2px, calc(var(--w) * 0.045));
-  border-radius: calc(var(--w) * 0.05);
-  background:
-    radial-gradient(circle at 50% 50%, rgba(240, 213, 138, 0.55) 0 8%, transparent 9%),
-    repeating-linear-gradient(45deg, rgba(240, 213, 138, 0.3) 0 1px, transparent 1px calc(var(--w) * 0.1)),
-    repeating-linear-gradient(-45deg, rgba(240, 213, 138, 0.3) 0 1px, transparent 1px calc(var(--w) * 0.1)),
-    radial-gradient(circle at 50% 40%, #9b2f2b, #5e1614);
-  box-shadow: inset 0 0 0 1px rgba(240, 213, 138, 0.6);
-}
-.card__frame .card__pattern {
-  inset: 0;
-  border-radius: inherit;
-}
-
-/* ---- States ---- */
-.card.is-selected {
-  transform: translateY(-20%);
-  box-shadow:
-    inset 0 0 0 1px rgba(60, 40, 20, 0.18),
-    0 0 0 2px var(--brass-hi, #f0d58a),
-    0 10px 18px rgba(0, 0, 0, 0.4);
-}
-.card.is-highlighted {
-  transform: translateY(-8%);
-  box-shadow:
-    inset 0 0 0 1px rgba(60, 40, 20, 0.18),
-    0 0 0 3px var(--brass-hi, #f0d58a),
-    0 8px 16px rgba(0, 0, 0, 0.4);
-}
-.card.is-dimmed {
-  opacity: 0.42;
-  filter: saturate(0.5);
-}
-
-@media (hover: hover) {
-  button.card:not(:disabled):not(.is-selected):hover {
-    transform: translateY(-8%);
-  }
+@media (prefers-reduced-motion: reduce) {
+  .card { transition: opacity var(--dur-reduced) linear; }
+  .card[data-state='lit'], .card[data-state='picked'] { transform: none; }
 }

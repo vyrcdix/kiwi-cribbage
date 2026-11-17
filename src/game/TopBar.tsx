@@ -1,3 +1,4 @@
+import { Mark } from '../brand/Mark';
 import { navigate } from '../lib/router';
 import type { ConnStatus } from '../lib/useGameSocket';
 
@@ -22,7 +23,7 @@ export function TopBar({ status, code, hand }: { status: ConnStatus; code: strin
         <span>Games</span>
       </button>
       <span className="topbar__title">
-        <span className="topbar__brand">Cabbage</span>
+        <span className="topbar__brand"><Mark variant="simple" size={20} />Cabbage</span>
         <span className="topbar__meta">
           {code}
           {hand ? ` · deal ${hand}` : ''}
