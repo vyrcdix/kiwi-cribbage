@@ -1,0 +1,197 @@
+/* Cards. Everything scales from --card-w, set by the container. */
+.card {
+  --w: var(--card-w, 64px);
+  position: relative;
+  flex: none;
+  display: block;
+  width: var(--w);
+  height: calc(var(--w) * 1.4);
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: calc(var(--w) * 0.085);
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: calc(var(--w) * 0.2);
+  line-height: 1;
+  color: var(--card-ink, #1f1b16);
+  background: var(--card-face, #fbf5e6);
+  box-shadow:
+    inset 0 0 0 1px rgba(60, 40, 20, 0.18),
+    0 1px 1px rgba(0, 0, 0, 0.3),
+    0 3px 8px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.25s ease, filter 0.25s ease;
+}
+
+button.card {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+button.card:disabled {
+  cursor: default;
+}
+button.card:focus-visible {
+  outline: 3px solid var(--brass-hi, #f0d58a);
+  outline-offset: 2px;
+}
+
+.card--red {
+  color: var(--card-red, #b3261e);
+}
+
+/* ---- Drawn face ---- */
+.card__corner {
+  position: absolute;
+  top: 0.32em;
+  left: 0.26em;
+  width: 1.15em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.08em;
+}
+.card__corner--br {
+  top: auto;
+  left: auto;
+  bottom: 0.32em;
+  right: 0.26em;
+  transform: rotate(180deg);
+}
+.card__rank {
+  font-weight: 700;
+  font-size: 1.08em;
+  letter-spacing: -0.08em;
+  white-space: nowrap;
+}
+.card__pip {
+  width: 0.78em;
+  height: 0.78em;
+}
+.card__center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.card__big {
+  width: 2.3em;
+  height: 2.3em;
+}
+.card__center--ace .card__big {
+  width: 3em;
+  height: 3em;
+}
+.card__court {
+  position: absolute;
+  inset: 20% 22%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1em;
+  border-radius: 0.25em;
+  border: 1px solid rgba(160, 120, 40, 0.55);
+  background:
+    linear-gradient(180deg, rgba(201, 162, 74, 0.16), rgba(201, 162, 74, 0.04));
+}
+.card__court-letter {
+  font-size: 2em;
+  font-weight: 700;
+  font-style: italic;
+}
+.card__court-suit {
+  width: 1.1em;
+  height: 1.1em;
+}
+
+/* ---- Photo faces (future decks) ---- */
+.card__photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* ---- Back ---- */
+.card--back {
+  background: var(--card-face, #fbf5e6);
+}
+/* Thin cream border around a full-bleed photo, same rounding as the faces. */
+.card__frame {
+  position: absolute;
+  inset: max(2px, calc(var(--w) * 0.045));
+  border-radius: calc(var(--w) * 0.05);
+  overflow: hidden;
+  background: #7a2a1c;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+.card__frame .card__photo {
+  object-position: 50% 30%;
+}
+/* Photo court cards keep the picture's own framing, and carry their rank and
+   suit on cream chips so they read at a glance over any photo. */
+.card__frame--face .card__photo {
+  object-position: 50% 50%;
+}
+.card__corner--chip {
+  top: 0;
+  left: 0;
+  width: 1.3em;
+  padding: 0.26em 0 0.2em;
+  background: var(--card-face, #fbf5e6);
+  border-bottom-right-radius: 0.3em;
+  box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.25);
+}
+.card__corner--chip.card__corner--br {
+  top: auto;
+  left: auto;
+  bottom: 0;
+  right: 0;
+}
+/* Drawn fallback back: a brass lattice on oxblood. */
+.card__pattern {
+  position: absolute;
+  inset: max(2px, calc(var(--w) * 0.045));
+  border-radius: calc(var(--w) * 0.05);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(240, 213, 138, 0.55) 0 8%, transparent 9%),
+    repeating-linear-gradient(45deg, rgba(240, 213, 138, 0.3) 0 1px, transparent 1px calc(var(--w) * 0.1)),
+    repeating-linear-gradient(-45deg, rgba(240, 213, 138, 0.3) 0 1px, transparent 1px calc(var(--w) * 0.1)),
+    radial-gradient(circle at 50% 40%, #9b2f2b, #5e1614);
+  box-shadow: inset 0 0 0 1px rgba(240, 213, 138, 0.6);
+}
+.card__frame .card__pattern {
+  inset: 0;
+  border-radius: inherit;
+}
+
+/* ---- States ---- */
+.card.is-selected {
+  transform: translateY(-20%);
+  box-shadow:
+    inset 0 0 0 1px rgba(60, 40, 20, 0.18),
+    0 0 0 2px var(--brass-hi, #f0d58a),
+    0 10px 18px rgba(0, 0, 0, 0.4);
+}
+.card.is-highlighted {
+  transform: translateY(-8%);
+  box-shadow:
+    inset 0 0 0 1px rgba(60, 40, 20, 0.18),
+    0 0 0 3px var(--brass-hi, #f0d58a),
+    0 8px 16px rgba(0, 0, 0, 0.4);
+}
+.card.is-dimmed {
+  opacity: 0.42;
+  filter: saturate(0.5);
+}
+
+@media (hover: hover) {
+  button.card:not(:disabled):not(.is-selected):hover {
+    transform: translateY(-8%);
+  }
+}

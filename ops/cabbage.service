@@ -1,0 +1,25 @@
+# Cabbage — the cribbage server.
+# Install:  cp ops/cabbage.service /etc/systemd/system/ && systemctl daemon-reload
+# Manage:   systemctl {enable --now|restart|status} cabbage
+[Unit]
+Description=Cabbage (cribbage)
+After=network.target
+
+[Service]
+Type=simple
+User=cabbage
+WorkingDirectory=/opt/cabbage
+EnvironmentFile=/etc/cabbage/cabbage.env
+ExecStart=/usr/bin/npm --prefix server start
+Restart=on-failure
+RestartSec=5
+
+# Hardening — the server can write only its own data dir.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/cabbage
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,24 @@
+# Caddy route for Cabbage. Install next to the Steep tenant routes, which the
+# main Caddyfile already imports:
+#   cp ops/cabbage.caddy /etc/caddy/tenants/ && systemctl reload caddy
+cabbage.steep.work {
+	encode gzip
+
+	# API + game socket → the node server. Caddy upgrades WebSockets itself.
+	@backend path /api/* /ws
+	handle @backend {
+		reverse_proxy 127.0.0.1:8521
+	}
+
+	# Built assets are content-hashed, so they can be cached hard.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	# Everything else → the built SPA, falling back to index.html so
+	# /g/CODE invite links load.
+	handle {
+		root * /opt/cabbage/dist
+		try_files {path} /index.html
+		file_server
+	}
+}

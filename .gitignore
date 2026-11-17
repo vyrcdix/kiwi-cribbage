@@ -1,0 +1,20 @@
+node_modules
+dist
+*.local
+.vite
+*.tsbuildinfo
+
+# Local operator notes and secrets. Never tracked.
+private-notes.md
+.env
+.env.*
+!.env.example
+
+# Server runtime artifacts
+server/*.db
+server/*.db-*
+server/dist/
+
+.vscode/*
+.idea
+.DS_Store
