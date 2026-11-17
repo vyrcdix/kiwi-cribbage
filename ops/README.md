@@ -23,6 +23,12 @@ install -d -o cabbage -g cabbage /srv/cabbage
 
 # 2. build
 sudo -u cabbage bash -lc 'cd /opt/cabbage && npm install && npm --prefix server install && npm run build'
+# npm 12 blocks dependencies' install scripts, which leaves better-sqlite3 without
+# its compiled binary: the service then crash-loops and the site answers 502.
+# Run the package's own install script (needs build-essential and python3 only
+# if no prebuilt binary is available):
+sudo -u cabbage bash -lc 'cd /opt/cabbage/server/node_modules/better-sqlite3 && npm run install'
+ls /opt/cabbage/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node
 
 # 3. config
 install -d /etc/cabbage
@@ -40,8 +46,14 @@ systemctl daemon-reload && systemctl enable --now cabbage
 curl -s http://127.0.0.1:8521/api/health        # {"ok":true}
 
 # 5. front door
+install -d /etc/caddy/tenants
 cp /opt/cabbage/ops/cabbage.caddy /etc/caddy/tenants/
+# The main Caddyfile must import the tenants folder, or Caddy never reads the
+# route and the browser shows ERR_SSL_PROTOCOL_ERROR. Add the line if it is missing:
+grep -q 'import /etc/caddy/tenants/\*.caddy' /etc/caddy/Caddyfile \
+  || printf '\nimport /etc/caddy/tenants/*.caddy\n' >> /etc/caddy/Caddyfile
 caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+curl -s https://cabbage.steep.work/api/health   # {"ok":true}, up to a minute after the reload
 
 # 6. nightly backup
 echo '15 3 * * * root /opt/cabbage/ops/backup.sh' > /etc/cron.d/cabbage-backup
@@ -51,8 +63,7 @@ echo '15 3 * * * root /opt/cabbage/ops/backup.sh' > /etc/cron.d/cabbage-backup
 exists, nothing to do. Otherwise add `cabbage.steep.work  A  <vps-ip>`; Caddy
 issues a certificate on the first request.
 
-**Port:** 8521 is clear of the Steep band (8421 upward). If the main Caddyfile
-does not have `import /etc/caddy/tenants/*.caddy`, add that line.
+**Port:** 8521 is clear of the Steep band (8421 upward).
 
 ## Day to day
 
