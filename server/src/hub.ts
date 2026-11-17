@@ -30,6 +30,8 @@ interface Conn {
   code: string | null;
   /** Who this socket is; their seat is looked up afresh (seats can be rearranged while waiting). */
   playerId: string | null;
+  /** The session (device) that said hello; signing it out or revoking it hangs this socket up. */
+  sessionId: string | null;
   helloTimer: NodeJS.Timeout | null;
 }
 
@@ -155,6 +157,11 @@ export class Hub {
     for (const conn of [...(this.rooms.get(code) ?? [])]) if (conn.playerId === playerId) this.reject(conn, message);
   }
 
+  /** Hang up every socket opened by one session (that device signed out or was revoked). */
+  kickSession(sessionId: string, message: string): void {
+    for (const conn of [...this.conns]) if (conn.sessionId === sessionId) this.reject(conn, message);
+  }
+
   /** Hang up one player's sockets everywhere (deactivated). */
   kickPlayer(playerId: string, message: string): void {
     for (const conn of [...this.conns]) if (conn.playerId === playerId) this.reject(conn, message);
@@ -185,7 +192,7 @@ export class Hub {
   // ---- internals ----
 
   private onConnection(ws: WebSocket): void {
-    const conn: Conn = { ws, alive: true, code: null, playerId: null, helloTimer: null };
+    const conn: Conn = { ws, alive: true, code: null, playerId: null, sessionId: null, helloTimer: null };
     this.conns.add(conn);
     conn.helloTimer = setTimeout(() => {
       if (conn.code === null) this.reject(conn, 'Expected hello');
@@ -255,6 +262,7 @@ export class Hub {
     conn.helloTimer = null;
     conn.code = game.code;
     conn.playerId = player.id;
+    conn.sessionId = auth.sessionId;
     let room = this.rooms.get(game.code);
     if (!room) this.rooms.set(game.code, (room = new Set()));
     room.add(conn);
@@ -263,6 +271,10 @@ export class Hub {
   }
 
   private onAct(conn: Conn, rawAction: unknown): void {
+    // The socket authenticated at hello; make sure that session (and membership) still stands.
+    // Sign-out, revocation and deactivation hang sockets up, but never act on a stale one.
+    const why = this.store.sessionProblem(conn.sessionId!);
+    if (why) return this.reject(conn, why);
     const action = parseAction(rawAction);
     if (!action) return this.sendError(conn, 'Malformed action');
     const game = this.store.game(conn.code!);

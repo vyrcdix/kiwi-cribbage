@@ -15,6 +15,7 @@ import {
   type DeviceLinkCode,
   type InviteStatus,
   isAvatar,
+  isSingleEmoji,
   type LeagueInvite,
   MAX_NAME,
   type Me,
@@ -27,18 +28,31 @@ import { HttpError, isId, me, objectBody, onlyKeys, requireAuth, sessionId, text
 import type { Hub } from './hub.js';
 import { leagueRoutes } from './league-api.js';
 import { normalizeCode } from './random.js';
+import { DEFAULT_RATE_LIMITS, type RateLimits, rateLimiter } from './ratelimit.js';
 import { type GameRow, parseScores, parseState, type PlayerRow, type Store } from './store.js';
 
 export { HttpError };
 
-export function apiRouter(store: Store, hub: Hub): express.Router {
+export function apiRouter(store: Store, hub: Hub, limits: RateLimits = DEFAULT_RATE_LIMITS): express.Router {
   const r = express.Router();
   const auth = requireAuth(store);
+  const now = () => store.nowMs();
+  const joinLimit = rateLimiter(limits.join, now);
+  const redeemLimit = rateLimiter(limits.redeem, now);
+  const inviteLimit = rateLimiter(limits.invite, now);
 
   const findGame = (raw: unknown): GameRow => {
     const game = store.game(normalizeCode(raw));
     if (!game) throw new HttpError(404, 'No such game');
     return game;
+  };
+
+  /** 409 if any of these players has been deactivated (a game with them in it could never move). */
+  const refuseInactive = (ids: (string | null)[]): void => {
+    for (const id of ids) {
+      const p = id ? store.player(id) : undefined;
+      if (p && !p.active) throw new HttpError(409, `${p.name} is no longer an active member`);
+    }
   };
 
   const meOut = (p: PlayerRow): Me => ({ ...store.card(p), createdAt: p.created_at });
@@ -90,7 +104,7 @@ export function apiRouter(store: Store, hub: Hub): express.Router {
 
   // ---- joining the league ----
 
-  r.post('/players', (req, res) => {
+  r.post('/players', joinLimit, (req, res) => {
     const name = text(req.body?.name, MAX_NAME, 'Name');
     const b = objectBody(req);
     const { invite, code } = b;
@@ -101,6 +115,7 @@ export function apiRouter(store: Store, hub: Hub): express.Router {
           const st = store.inviteState(invite);
           if (st === 'used') throw new HttpError(403, 'That invite link has already been used');
           if (st === 'expired') throw new HttpError(403, 'That invite link has expired');
+          if (st === 'revoked') throw new HttpError(403, 'That invite link is no longer valid: ask a member for a new one');
           if (st !== 'ok') throw new HttpError(403, 'That invite link is not valid');
         } else if (code !== undefined) {
           if (typeof code !== 'string') throw new HttpError(400, 'code must be a string');
@@ -122,13 +137,14 @@ export function apiRouter(store: Store, hub: Hub): express.Router {
     res.status(201).json(out);
   });
 
-  r.get('/invites/:token', (req, res) => {
+  r.get('/invites/:token', inviteLimit, (req, res) => {
     const inv = store.invite(req.params.token);
     const st = store.inviteState(req.params.token);
     const by = inv ? store.playerInfo(inv.created_by) : null;
     const out: InviteStatus = {
       valid: st === 'ok',
-      reason: st === 'ok' ? null : st,
+      // An invite whose issuer was deactivated reads as expired (no longer usable; ask for a new one).
+      reason: st === 'ok' ? null : st === 'revoked' ? 'expired' : st,
       invitedBy: st === 'ok' ? by : null,
       expiresAt: st === 'ok' && inv ? inv.expires_at : null,
     };
@@ -142,7 +158,7 @@ export function apiRouter(store: Store, hub: Hub): express.Router {
     res.status(201).json(out);
   });
 
-  r.post('/link/redeem', (req, res) => {
+  r.post('/link/redeem', redeemLimit, (req, res) => {
     const b = objectBody(req);
     if (typeof b.code !== 'string') throw new HttpError(400, 'code must be a string');
     const out: CreatePlayerResponse = store.transaction(() => {
@@ -163,12 +179,15 @@ export function apiRouter(store: Store, hub: Hub): express.Router {
 
   r.delete('/me/sessions/:id', auth, (req, res) => {
     if (!isId(req.params.id) || !store.deleteSession(me(res).id, req.params.id)) throw new HttpError(404, 'No such session');
+    // That device's open game sockets end too (a lost phone signed out from another device).
+    hub.kickSession(req.params.id, 'This device was signed out');
     const out: OkResponse = { ok: true };
     res.json(out);
   });
 
   r.post('/me/sign-out', auth, (_req, res) => {
     store.deleteSession(me(res).id, sessionId(res));
+    hub.kickSession(sessionId(res), 'Signed out');
     const out: OkResponse = { ok: true };
     res.json(out);
   });
@@ -186,7 +205,7 @@ export function apiRouter(store: Store, hub: Hub): express.Router {
     const fields: UpdateMeRequest = {};
     if (b.name !== undefined) fields.name = text(b.name, MAX_NAME, 'Name');
     if (b.avatar !== undefined) {
-      if (b.avatar !== null && !isAvatar(b.avatar)) throw new HttpError(400, 'avatar must be { emoji: one emoji, colour: "#rrggbb" } or null');
+      if (b.avatar !== null && !(isAvatar(b.avatar) && isSingleEmoji(b.avatar.emoji))) throw new HttpError(400, 'avatar must be { emoji: one emoji, colour: "#rrggbb" } or null');
       fields.avatar = b.avatar === null ? null : { emoji: b.avatar.emoji, colour: b.avatar.colour.toLowerCase() };
     }
     if (b.deck !== undefined) {
@@ -222,6 +241,9 @@ export function apiRouter(store: Store, hub: Hub): express.Router {
       const seat = store.seatOf(game.code, pid);
       if (seat !== null) return { code: game.code, seat, events: null, seated: false };
       if (game.voided_at) throw new HttpError(409, 'This game was voided');
+      // Filling the last seat deals the game: never with someone who can no longer move.
+      const seats = store.seats(game);
+      if (seats.filter((s) => s === null).length === 1) refuseInactive(seats);
       const taken = store.takeSeat(game, pid);
       if (!taken) throw new HttpError(409, 'Game is full');
       return { code: game.code, seat: taken.seat, events: taken.events, seated: true };
@@ -303,6 +325,7 @@ export function apiRouter(store: Store, hub: Hub): express.Router {
       if (game.next_code) return { old: game.code, code: game.next_code, created: false };
       // Same players in the same seats; the cut decides the first dealer afresh.
       const seats = store.seats(game) as string[];
+      refuseInactive(seats);
       const code = store.createActiveGame(game.players, game.creator, seats);
       store.setNextCode(game.code, code);
       return { old: game.code, code, created: true };

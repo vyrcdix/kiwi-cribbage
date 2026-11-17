@@ -111,6 +111,38 @@ export function isAvatar(x: unknown): x is Avatar {
   return keys.length === 2 && isEmoji(a.emoji) && typeof a.colour === 'string' && COLOUR.test(a.colour);
 }
 
+// One emoji, element by element: a pictographic emoji shown as an emoji (it
+// has emoji presentation, or asks for it with VS16, or carries a skin tone).
+const EMOJI_BASE = '(?=\\p{Emoji})(?![\\u00A9\\u00AE\\u2122])\\p{Extended_Pictographic}';
+const EMOJI_ALONE = `(?:(?=\\p{Emoji_Modifier_Base})${EMOJI_BASE}\\p{Emoji_Modifier}|${EMOJI_BASE}\\uFE0F|(?=\\p{Emoji_Presentation})${EMOJI_BASE})`;
+// Inside a ZWJ sequence the later parts may leave out VS16 (minimally-qualified sequences).
+const EMOJI_PART = `${EMOJI_BASE}(?:\\p{Emoji_Modifier}|\\uFE0F)?`;
+const SINGLE_EMOJI = new RegExp(
+  '^(?:' +
+    [
+      `${EMOJI_ALONE}(?:\\u200D${EMOJI_PART})*`, // 😀 ❤️ 👍🏽 👨‍👩‍👧‍👦 🏳️‍🌈
+      `${EMOJI_PART}(?:\\u200D${EMOJI_PART})+`,
+      '\\p{Regional_Indicator}{2}', // 🇳🇿
+      '[0-9#*]\\uFE0F?\\u20E3', // 1️⃣
+      // England, Scotland, Wales: the only tag sequences that are emoji.
+      '\\u{1F3F4}(?:\\u{E0067}\\u{E0062}(?:\\u{E0065}\\u{E006E}\\u{E0067}|\\u{E0073}\\u{E0063}\\u{E0074}|\\u{E0077}\\u{E006C}\\u{E0073}))\\u{E007F}',
+    ].join('|') +
+    ')$',
+  'u',
+);
+
+/**
+ * Stricter than isEmoji: exactly one genuine emoji and nothing hidden with it.
+ * Skin tones, ZWJ sequences (families, rainbow flag), flags, keycaps and the
+ * three subdivision flags pass; text symbols such as © ® ™ (with or without
+ * VS16), a pictograph in text presentation, a lone regional indicator, and an
+ * emoji followed by tag characters or other invisible extenders do not.
+ * The server applies this to avatars.
+ */
+export function isSingleEmoji(x: unknown): x is string {
+  return isEmoji(x) && SINGLE_EMOJI.test(x);
+}
+
 // ---------------------------------------------------------------- joining
 
 /**
@@ -207,6 +239,13 @@ export const MAX_SEASON_NAME = 40;
  * Which games a statistic covers. Query parameter `season`: a season id, or
  * `all` for all time. Standings default to the current season; head-to-head,
  * player stats and the hall of fame default to all time.
+ *
+ * A game belongs to the season it was created (dealt or opened for players)
+ * in, not the one it finishes in: a game still in progress when the
+ * commissioner starts a new season counts, once finished, for the old season's
+ * standings and statistics, never the new one's (its `seasonId` says which).
+ * A fixture still queued at the rollover moves into the new season, as does one
+ * put back in the queue later because its game was voided.
  */
 export type SeasonFilter = number | 'all';
 
@@ -277,6 +316,18 @@ export interface StandingsResponse {
  * - crib: every crib counted while you were the dealer;
  * - pegging: your pegging points (plays + go / last card, not heels) in every hand
  *   whose pegging was played out (the hand that ends a game mid-peg is left out).
+ *   A hand counts when every card was played, so:
+ *   - a game that ends during the pegging (before the last card) leaves that hand
+ *     out of the pegging average for every player at the table, points pegged
+ *     in it included (they still count on the board and towards the result);
+ *   - a game that ends on the last card keeps that hand in, the winning play
+ *     counted at its full rule value. If the last card's own score (a pair, a
+ *     run, fifteen, 31…) ends the game, the one point for last card is never
+ *     scored and so is not counted; if that one point is what ends it, it is;
+ *   - a game that ends on the cut (his heels) has no pegging in that hand to
+ *     count; one that ends in the show had its pegging played out, so it counts.
+ *   Likewise a hand or crib that was never counted because the game ended first
+ *   is left out of the hand and crib averages.
  * Values are the full rule values (a winning score capped at 121 still counts in full).
  */
 export interface Averages {
@@ -463,6 +514,7 @@ export interface PendingGame {
   code: string;
   status: 'waiting' | 'active';
   players: PlayerCount;
+  /** The season the game was created in; it counts for that season once finished (see SeasonFilter). */
   seasonId: number;
   fixtureId: string | null;
   /** By seat; null = an open seat. */
@@ -489,6 +541,7 @@ export interface PendingResponse {
 export interface GameResult {
   code: string;
   players: PlayerCount;
+  /** The season the game was created in, which it counts for (see SeasonFilter). */
   seasonId: number;
   fixtureId: string | null;
   seats: PlayerCard[];

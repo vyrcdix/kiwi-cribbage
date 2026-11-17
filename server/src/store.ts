@@ -1,7 +1,7 @@
 // Data access for players, sessions, games, hands, seasons and fixtures. All
 // calls are synchronous (better-sqlite3), so each request / socket message runs
 // to completion without interleaving.
-import type { Card } from '../../shared/cards.js';
+import { type Card, sortHand } from '../../shared/cards.js';
 import {
   type GameEvent,
   type GameState,
@@ -16,7 +16,7 @@ import {
   teamOf,
 } from '../../shared/game.js';
 import type { Avatar, FixtureKind, FixtureStatus, PlayerCard } from '../../shared/league.js';
-import { isAvatar } from '../../shared/league.js';
+import { isAvatar, isSingleEmoji } from '../../shared/league.js';
 import type { DB } from './db.js';
 import { CODE_ALPHABET, hashToken, newId, newToken, randomCode, shuffle as cryptoShuffle } from './random.js';
 import { randomInt } from 'node:crypto';
@@ -125,11 +125,12 @@ export const LINK_CODE_LENGTH = 8;
 /** Only bump sessions.last_seen_at when it is older than this. */
 const SEEN_GRANULARITY_MS = 60 * 1000;
 
+/** A stored avatar, or null. One stored before the emoji check was tightened that fails it now (e.g. an emoji carrying hidden tag characters) reads as none. */
 export const parseAvatar = (raw: string | null): Avatar | null => {
   if (!raw) return null;
   try {
     const v: unknown = JSON.parse(raw);
-    return isAvatar(v) ? { emoji: v.emoji, colour: v.colour } : null;
+    return isAvatar(v) && isSingleEmoji(v.emoji) ? { emoji: v.emoji, colour: v.colour } : null;
   } catch {
     return null;
   }
@@ -295,6 +296,15 @@ export class Store {
       .all(playerId) as { id: string; created_at: string; last_seen_at: string }[];
   }
 
+  /** Why a session may no longer act (signed out / revoked, or the member deactivated), or null if it may. */
+  sessionProblem(sessionId: string): string | null {
+    const row = this.db
+      .prepare('SELECT p.active FROM sessions s JOIN players p ON p.id = s.player_id WHERE s.id = ?')
+      .get(sessionId) as { active: number } | undefined;
+    if (!row) return 'Not signed in';
+    return row.active ? null : 'Your membership has been deactivated';
+  }
+
   deleteSession(playerId: string, sessionId: string): boolean {
     return this.db.prepare('DELETE FROM sessions WHERE id = ? AND player_id = ?').run(sessionId, playerId).changes > 0;
   }
@@ -353,11 +363,13 @@ export class Store {
     return this.db.prepare('SELECT * FROM invites WHERE token_hash = ?').get(hashToken(token)) as ReturnType<Store['invite']>;
   }
 
-  inviteState(token: unknown): 'ok' | 'unknown' | 'used' | 'expired' {
+  /** 'revoked': whoever issued it has since been deactivated, so it no longer works. */
+  inviteState(token: unknown): 'ok' | 'unknown' | 'used' | 'expired' | 'revoked' {
     const inv = this.invite(token);
     if (!inv) return 'unknown';
     if (inv.used_at !== null) return 'used';
     if (Date.parse(inv.expires_at) <= this.nowMs()) return 'expired';
+    if (!this.player(inv.created_by)?.active) return 'revoked';
     return 'ok';
   }
 
@@ -582,10 +594,11 @@ export class Store {
     );
     for (const sr of seats) {
       const seat = sr.seat;
-      const kept: Card[] = log.dealt[seat].filter((c) => !log.discards[seat].includes(c));
+      // Both stored sorted, as the contract promises for HandHighlight.cards.
+      const kept: Card[] = sortHand(log.dealt[seat].filter((c) => !log.discards[seat].includes(c)));
       const handShow = log.shows.find((sh) => sh.seat === seat && !sh.crib);
       const cribShow = seat === log.dealer ? log.shows.find((sh) => sh.crib) : undefined;
-      const crib = seat === log.dealer ? [...(log.deckToCrib === null ? [] : [log.deckToCrib]), ...log.discards.flat()] : null;
+      const crib = seat === log.dealer ? sortHand([...(log.deckToCrib === null ? [] : [log.deckToCrib]), ...log.discards.flat()]) : null;
       let peg = 0;
       for (const p of log.peg) if (p.t !== 'go' && p.seat === seat) peg += p.points;
       ins.run(
@@ -709,9 +722,9 @@ export class Store {
     return this.db.prepare(sql).all(...args) as FixtureRow[];
   }
 
-  setFixture(id: string, fields: Partial<Pick<FixtureRow, 'status' | 'game_code' | 'closed_by' | 'closed_at'>>): void {
+  setFixture(id: string, fields: Partial<Pick<FixtureRow, 'status' | 'game_code' | 'closed_by' | 'closed_at' | 'season_id'>>): void {
     for (const [k, v] of Object.entries(fields)) {
-      if (!['status', 'game_code', 'closed_by', 'closed_at'].includes(k)) continue;
+      if (!['status', 'game_code', 'closed_by', 'closed_at', 'season_id'].includes(k)) continue;
       this.db.prepare(`UPDATE fixtures SET ${k} = ? WHERE id = ?`).run(v, id);
     }
   }

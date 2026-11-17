@@ -77,10 +77,27 @@ export const seasonParam = (store: Store, raw: unknown, fallback: 'current' | 'a
   return s;
 };
 
-/** A trimmed string of length 1..max, or 400 with `what` in the message. */
+/** A UTF-16 surrogate without its partner (SQLite would store it as U+FFFD). */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+/** Bidirectional embedding / override (U+202A–202E) and isolate (U+2066–2069) controls: they reorder the text around a name. */
+const BIDI_CONTROL = /[‪-‮⁦-⁩]/;
+/**
+ * Characters that draw nothing on their own: white space, format characters
+ * (zero-width space / joiner, word joiner, tags, …), anything default-ignorable
+ * (Hangul fillers, variation selectors, …), combining marks with no base, and
+ * the Braille blank.
+ */
+const INVISIBLE = /[\p{White_Space}\p{Cc}\p{Cf}\p{Z}\p{M}\p{Default_Ignorable_Code_Point}⠀]/u;
+
+/**
+ * A trimmed string of length 1..max that shows at least one visible character,
+ * or 400 with `what` in the message.
+ */
 export const text = (raw: unknown, max: number, what: string): string => {
   const s = typeof raw === 'string' ? raw.trim() : '';
   if (s.length < 1 || s.length > max) throw new HttpError(400, `${what} must be 1–${max} characters`);
-  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(s)) throw new HttpError(400, `${what} may not contain control characters`);
+  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(s) || BIDI_CONTROL.test(s)) throw new HttpError(400, `${what} may not contain control characters`);
+  if (LONE_SURROGATE.test(s)) throw new HttpError(400, `${what} is not valid text (a broken character)`);
+  if (![...s].some((ch) => !INVISIBLE.test(ch))) throw new HttpError(400, `${what} must contain at least one visible character`);
   return s;
 };

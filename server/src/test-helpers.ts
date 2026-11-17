@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import WebSocket from 'ws';
 import { value } from '../../shared/cards.js';
 import { type Action, discardCount, type GameState, leftOf, type PlayerCount, type PlayerView, type ServerMsg } from '../../shared/game.js';
-import { type CabbageServer, createApp } from './app.js';
+import { type AppOptions, type CabbageServer, createApp } from './app.js';
 import type { HubOptions } from './hub.js';
 import { type GameRow, type SeatRow, type StoreOptions, upgradeState } from './store.js';
 
@@ -30,7 +30,7 @@ export interface Running {
   wsUrl: string;
 }
 
-export const startApp = async (dbPath: string, opts: HubOptions & StoreOptions = {}): Promise<Running> => {
+export const startApp = async (dbPath: string, opts: HubOptions & StoreOptions & Pick<AppOptions, 'rateLimits'> = {}): Promise<Running> => {
   const server = createApp({ dbPath, logMigrations: false, ...opts });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;

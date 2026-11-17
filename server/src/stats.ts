@@ -2,7 +2,7 @@
 // their seats (games / game_players) and the flattened hand rows (hand_seats).
 // Everything here is pure; the caller decides which games count (finished,
 // not voided, optionally one season).
-import type { Card } from '../../shared/cards.js';
+import { type Card, sortHand } from '../../shared/cards.js';
 import { type PlayerCount, type SkunkLevel, teamCount, teamOf } from '../../shared/game.js';
 import {
   type Averages,
@@ -199,11 +199,14 @@ export function averages(hands: HandRec[]): Averages {
   return a;
 }
 
+/** A stored hand or crib, sorted (rows written before cribs were stored sorted are put right here). */
+const storedCards = (h: HandRec, crib: boolean): Card[] => sortHand(JSON.parse(crib ? h.crib_cards! : h.hand_cards) as Card[]);
+
 const highlight = (h: HandRec, crib: boolean): HandHighlight => ({
   code: h.game_code,
   handNo: h.hand_no,
   at: h.finished_at,
-  cards: JSON.parse(crib ? h.crib_cards! : h.hand_cards) as Card[],
+  cards: storedCards(h, crib),
   starter: h.starter!,
   points: (crib ? h.crib_points : h.hand_points)!,
   crib,
@@ -227,7 +230,7 @@ const handOccurrence = (h: HandRec, crib: boolean): HonourOccurrence => ({
   code: h.game_code,
   at: h.finished_at,
   handNo: h.hand_no,
-  cards: JSON.parse(crib ? h.crib_cards! : h.hand_cards) as Card[],
+  cards: storedCards(h, crib),
   starter: h.starter,
 });
 

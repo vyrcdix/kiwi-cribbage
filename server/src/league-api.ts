@@ -419,11 +419,12 @@ export function leagueRoutes(r: express.Router, store: Store, hub: Hub): void {
       const g = findGame(req.params.code);
       if (g.voided_at) throw new HttpError(409, 'That game is already void');
       store.setVoid(g.code, me(res).id, reason);
-      // A fixture's game voided: the fixture goes back in the queue to be played again.
+      // A fixture's game voided: the fixture goes back in the queue to be played again, in the
+      // current season (as fixtures queued at a rollover move into the new season).
       if (g.fixture_id) {
         const f = store.fixture(g.fixture_id);
         if (f && f.game_code === g.code)
-          store.setFixture(f.id, { status: 'queued', game_code: null, closed_at: null, closed_by: null });
+          store.setFixture(f.id, { status: 'queued', game_code: null, closed_at: null, closed_by: null, season_id: store.currentSeason().id });
       }
       return g.code;
     });
@@ -440,7 +441,8 @@ export function leagueRoutes(r: express.Router, store: Store, hub: Hub): void {
         const f = store.fixture(g.fixture_id);
         if (f && f.status === 'queued' && f.game_code === null) {
           const done = g.status === 'finished';
-          store.setFixture(f.id, { status: done ? 'done' : 'playing', game_code: g.code, closed_at: done ? g.finished_at : null });
+          // Back with its game, in its game's season.
+          store.setFixture(f.id, { status: done ? 'done' : 'playing', game_code: g.code, closed_at: done ? g.finished_at : null, season_id: g.season_id });
         }
       }
       return g.code;
